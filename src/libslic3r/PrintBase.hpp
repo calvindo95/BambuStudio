@@ -406,7 +406,7 @@ public:
         // Some data was changed, which in turn invalidated already calculated steps.
         APPLY_STATUS_INVALIDATED,
     };
-    virtual ApplyStatus     apply(const Model &model, DynamicPrintConfig config) = 0;
+    virtual ApplyStatus     apply(const Model &model, DynamicPrintConfig config, bool extruder_applied = false) = 0;
     const Model&            model() const { return m_model; }
 
     struct TaskParams {
@@ -423,7 +423,7 @@ public:
     // After calling the apply() function, call set_task() to limit the task to be processed by process().
     virtual void            set_task(const TaskParams &params) {}
     // Perform the calculation. This is the only method that is to be called at a worker thread.
-    virtual void            process(long long *time_cost_with_cache = nullptr, bool use_cache = false) = 0;
+    virtual void            process(std::unordered_map<std::string, long long>* slice_time = nullptr, bool use_cache = false) = 0;
     virtual int             export_cached_data(const std::string& dir_path, bool with_space=false) { return 0;}
     virtual int            load_cached_data(const std::string& directory) { return 0;}
     // Clean up after process() finished, either with success, error or if canceled.
@@ -550,6 +550,7 @@ protected:
 
 	Model                                   m_model;
 	DynamicPrintConfig						m_full_print_config;
+    DynamicPrintConfig						m_ori_full_print_config;  //original full print config without extruder applied
     PlaceholderParser                       m_placeholder_parser;
 
     //BBS: add plate id into print base

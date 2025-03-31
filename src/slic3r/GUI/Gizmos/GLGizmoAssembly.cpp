@@ -27,6 +27,12 @@ GLGizmoAssembly::GLGizmoAssembly(GLCanvas3D& parent, const std::string& icon_fil
     m_measure_mode       = EMeasureMode::ONLY_ASSEMBLY;
 }
 
+bool GLGizmoAssembly::on_init() {
+    GLGizmoMeasure::on_init();
+    m_shortcut_key = WXK_CONTROL_Y;
+    return true;
+}
+
 std::string GLGizmoAssembly::on_get_name() const
 {
     if (!on_is_activable() && m_state == EState::Off) {
@@ -44,6 +50,9 @@ std::string GLGizmoAssembly::on_get_name() const
 bool GLGizmoAssembly::on_is_activable() const
 {
     const Selection& selection = m_parent.get_selection();
+    if (selection.is_wipe_tower()) {
+        return false;
+    }
     const int    selection_volumes_count = 2;
     if (wxGetApp().plater()->canvas3D()->get_canvas_type() == GLCanvas3D::ECanvasType::CanvasAssembleView) {
         if (abs(m_parent.get_explosion_ratio() - 1.0f) < 1e-2 && selection.volumes_count() >= selection_volumes_count) {

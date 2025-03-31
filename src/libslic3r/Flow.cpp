@@ -5,6 +5,7 @@
 #include <assert.h>
 
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/log/trivial.hpp>
 
 // Mark string for localization and translate.
 #define L(s) Slic3r::I18N::translate(s)
@@ -99,7 +100,7 @@ double Flow::extrusion_width(const std::string& opt_key, const ConfigOptionFloat
 
 	if (opt->value == 0.) {
         // If user left option to 0, calculate a sane default width.
-    	auto opt_nozzle_diameters = config.option<ConfigOptionFloats>("nozzle_diameter");
+    	auto opt_nozzle_diameters = config.option<ConfigOptionFloatsNullable>("nozzle_diameter");
     	if (opt_nozzle_diameters == nullptr)
     		throw_on_missing_variable(opt_key, "nozzle_diameter");
         return auto_extrusion_width(opt_key_to_flow_role(opt_key), float(opt_nozzle_diameters->get_at(first_printing_extruder)));
@@ -190,8 +191,10 @@ Flow Flow::with_cross_section(float area_new) const
 float Flow::rounded_rectangle_extrusion_spacing(float width, float height)
 {
     auto out = width - height * float(1. - 0.25 * PI);
-    if (out <= 0.f)
+    if (out <= 0.f) {
+        BOOST_LOG_TRIVIAL(error)<< __FUNCTION__ << boost::format("negative extrusion : width %1%   height %2%") % width % height;
         throw FlowErrorNegativeSpacing();
+    }
     return out;
 }
 
