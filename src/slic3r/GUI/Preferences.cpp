@@ -1368,13 +1368,18 @@ wxWindow* PreferencesDialog::create_general_page()
     sizer_page->Add(title_downloads, 0, wxTOP | wxEXPAND, FromDIP(20));
     sizer_page->Add(item_downloads, 0, wxEXPAND, FromDIP(3));
 
-#if defined(_WIN32) || (defined(__LINUX__) && (defined(__WXGTK20__) || defined(__WXGTK3__)))
     sizer_page->Add(title_media, 0, wxTOP| wxEXPAND, FromDIP(20));
     sizer_page->Add(item_auto_stop_liveview, 0, wxEXPAND, FromDIP(3));
 
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__LINUX__) && (defined(__WXGTK20__) || defined(__WXGTK3__)))
     sizer_page->Add(title_darkmode, 0, wxTOP | wxEXPAND, FromDIP(20));
     sizer_page->Add(item_darkmode, 0, wxEXPAND, FromDIP(3));
+#endif // _WIN32 && __LINUX__
+
+#if 0
+    sizer_page->Add(title_filament_group, 0, wxTOP | wxEXPAND, FromDIP(20));
+    //sizer_page->Add(item_ignore_ext_filament, 0, wxEXPAND, FromDIP(3));
+    sizer_page->Add(item_pop_up_filament_map_dialog, 0, wxEXPAND, FromDIP(3));
 #endif
 
     sizer_page->Add(title_user_experience, 0, wxTOP | wxEXPAND, FromDIP(20));
