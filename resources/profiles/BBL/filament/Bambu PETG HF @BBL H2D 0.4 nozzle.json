@@ -32,13 +32,21 @@
         "0.95",
         "0.95"
     ],
+    "filament_flush_temp": [
+        "0",
+        "0"
+    ],
+    "filament_flush_volumetric_speed": [
+        "0",
+        "0"
+    ],
     "filament_long_retractions_when_cut": [
         "nil",
         "nil"
     ],
     "filament_max_volumetric_speed": [
-        "24",
-        "32"
+        "25",
+        "35"
     ],
     "filament_pre_cooling_temperature": [
         "0",
@@ -69,8 +77,8 @@
         "nil"
     ],
     "filament_retraction_length": [
-        "nil",
-        "nil"
+        "0.4",
+        "0.4"
     ],
     "filament_retraction_minimum_travel": [
         "nil",
@@ -81,20 +89,20 @@
         "nil"
     ],
     "filament_wipe": [
-        "nil",
-        "nil"
+        "1",
+        "1"
     ],
     "filament_wipe_distance": [
-        "nil",
-        "nil"
+        "1",
+        "1"
     ],
     "filament_z_hop": [
         "nil",
         "nil"
     ],
     "filament_z_hop_types": [
-        "nil",
-        "nil"
+        "Spiral Lift",
+        "Spiral Lift"
     ],
     "hole_coef_2": [
         "-0.006"
@@ -104,6 +112,10 @@
     ],
     "hole_limit_min": [
         "0.1"
+    ],
+    "long_retractions_when_ec": [
+        "1",
+        "1"
     ],
     "nozzle_temperature": [
         "245",
@@ -116,6 +128,13 @@
     "overhang_fan_speed": [
         "100"
     ],
+    "pre_start_fan_time": [
+        "2"
+    ],
+    "retraction_distances_when_ec": [
+        "10",
+        "10"
+    ],
     "slow_down_layer_time": [
         "10"
     ],
@@ -126,7 +145,7 @@
         "Bambu Lab H2D 0.4 nozzle"
     ],
     "filament_start_gcode": [
-        "; filament start gcode\nM145 P0 ; set airduct mode to cooling mode\nM142 P1 R35 S40 U0.3 V0.5 ; set chamber autocooling"
+        "; filament start gcode\n"
     ],
     "filament_end_gcode": [
         "; filament end gcode \n"

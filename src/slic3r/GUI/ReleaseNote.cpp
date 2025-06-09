@@ -28,17 +28,13 @@ wxDEFINE_EVENT(EVT_SECONDARY_CHECK_CONFIRM, wxCommandEvent);
 wxDEFINE_EVENT(EVT_SECONDARY_CHECK_CANCEL, wxCommandEvent);
 wxDEFINE_EVENT(EVT_SECONDARY_CHECK_DONE, wxCommandEvent);
 wxDEFINE_EVENT(EVT_SECONDARY_CHECK_RESUME, wxCommandEvent);
-wxDEFINE_EVENT(EVT_LOAD_VAMS_TRAY, wxCommandEvent);
 wxDEFINE_EVENT(EVT_CHECKBOX_CHANGE, wxCommandEvent);
 wxDEFINE_EVENT(EVT_ENTER_IP_ADDRESS, wxCommandEvent);
 wxDEFINE_EVENT(EVT_CLOSE_IPADDRESS_DLG, wxCommandEvent);
 wxDEFINE_EVENT(EVT_CHECK_IP_ADDRESS_FAILED, wxCommandEvent);
 wxDEFINE_EVENT(EVT_CHECK_IP_ADDRESS_LAYOUT, wxCommandEvent);
 wxDEFINE_EVENT(EVT_SECONDARY_CHECK_RETRY, wxCommandEvent);
-wxDEFINE_EVENT(EVT_PRINT_ERROR_STOP, wxCommandEvent);
 wxDEFINE_EVENT(EVT_UPDATE_NOZZLE, wxCommandEvent);
-wxDEFINE_EVENT(EVT_JUMP_TO_HMS, wxCommandEvent);
-wxDEFINE_EVENT(EVT_JUMP_TO_LIVEVIEW, wxCommandEvent);
 wxDEFINE_EVENT(EVT_UPDATE_TEXT_MSG, wxCommandEvent);
 wxDEFINE_EVENT(EVT_ERROR_DIALOG_BTN_CLICKED, wxCommandEvent);
 
@@ -1089,130 +1085,35 @@ void PrintErrorDialog::init_button(PrintErrorButton style,wxString buton_text)
     print_error_button->SetCornerRadius(FromDIP(5));
     print_error_button->Hide();
     m_button_list[style] = print_error_button;
-
+    m_button_list[style]->Bind(wxEVT_LEFT_DOWN, [this, style](wxMouseEvent& e)
+    {
+        wxCommandEvent evt(EVT_ERROR_DIALOG_BTN_CLICKED);
+        evt.SetInt(style);
+        post_event(evt);
+        e.Skip();
+    });
 }
 
 void PrintErrorDialog::init_button_list()
 {
     init_button(RESUME_PRINTING, _L("Resume Printing"));
-    m_button_list[RESUME_PRINTING]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        post_event(wxCommandEvent(EVT_SECONDARY_CHECK_RESUME));
-        e.Skip();
-    });
-
-    init_button(RESUME_PRINTING_DEFECTS, _L("Resume Printing(defects acceptable)"));
-    m_button_list[RESUME_PRINTING_DEFECTS]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        post_event(wxCommandEvent(EVT_SECONDARY_CHECK_RESUME));
-        e.Skip();
-    });
-
-
-    init_button(RESUME_PRINTING_PROBELM_SOLVED, _L("Resume Printing(problem solved)"));
-    m_button_list[RESUME_PRINTING_PROBELM_SOLVED]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        post_event(wxCommandEvent(EVT_SECONDARY_CHECK_RESUME));
-        e.Skip();
-    });
-
-    init_button(STOP_PRINTING, _L("Stop Printing"));
-    m_button_list[STOP_PRINTING]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        post_event(wxCommandEvent(EVT_PRINT_ERROR_STOP));
-        e.Skip();
-    });
-
+    init_button(RESUME_PRINTING_DEFECTS, _L("Resume (defects acceptable)"));
+    init_button(RESUME_PRINTING_PROBELM_SOLVED, _L("Resume (problem solved)"));
+    init_button(STOP_PRINTING, _L("Stop Printing"));// pop up recheck dialog?
     init_button(CHECK_ASSISTANT, _L("Check Assistant"));
-    m_button_list[CHECK_ASSISTANT]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        post_event(wxCommandEvent(EVT_JUMP_TO_HMS));
-        this->on_hide();
-    });
-
     init_button(FILAMENT_EXTRUDED, _L("Filament Extruded, Continue"));
-    m_button_list[FILAMENT_EXTRUDED]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        post_event(wxCommandEvent(EVT_SECONDARY_CHECK_DONE));
-        e.Skip();
-    });
-
     init_button(RETRY_FILAMENT_EXTRUDED, _L("Not Extruded Yet, Retry"));
-    m_button_list[RETRY_FILAMENT_EXTRUDED]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        wxCommandEvent evt(EVT_SECONDARY_CHECK_RETRY, GetId());
-        e.SetEventObject(this);
-        GetEventHandler()->ProcessEvent(evt);
-        this->on_hide();
-    });
-
     init_button(CONTINUE, _L("Finished, Continue"));
-    m_button_list[CONTINUE]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        post_event(wxCommandEvent(EVT_SECONDARY_CHECK_DONE));
-        e.Skip();
-    });
-
     init_button(LOAD_VIRTUAL_TRAY, _L("Load Filament"));
-    m_button_list[LOAD_VIRTUAL_TRAY]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        post_event(wxCommandEvent(EVT_LOAD_VAMS_TRAY));
-        e.Skip();
-    });
-
     init_button(OK_BUTTON, _L("OK"));
-    m_button_list[OK_BUTTON]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        wxCommandEvent evt(EVT_SECONDARY_CHECK_CONFIRM, GetId());
-        e.SetEventObject(this);
-        GetEventHandler()->ProcessEvent(evt);
-        this->on_hide();
-    });
-
     init_button(FILAMENT_LOAD_RESUME, _L("Filament Loaded, Resume"));
-    m_button_list[FILAMENT_LOAD_RESUME]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        post_event(wxCommandEvent(EVT_SECONDARY_CHECK_RESUME));
-        e.Skip();
-    });
-
     init_button(JUMP_TO_LIVEVIEW, _L("View Liveview"));
-    m_button_list[JUMP_TO_LIVEVIEW]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        post_event(wxCommandEvent(EVT_JUMP_TO_LIVEVIEW));
-        e.Skip();
-    });
-
     init_button(NO_REMINDER_NEXT_TIME, _L("No Reminder Next Time"));
-    m_button_list[NO_REMINDER_NEXT_TIME]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        wxCommandEvent evt(EVT_ERROR_DIALOG_BTN_CLICKED);
-        evt.SetInt(NO_REMINDER_NEXT_TIME);
-        post_event(evt);
-        e.Skip();
-    });
-
     init_button(IGNORE_NO_REMINDER_NEXT_TIME, _L("Ignore. Don't Remind Next Time"));
-    m_button_list[IGNORE_NO_REMINDER_NEXT_TIME]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        wxCommandEvent evt(EVT_ERROR_DIALOG_BTN_CLICKED);
-        evt.SetInt(IGNORE_NO_REMINDER_NEXT_TIME);
-        post_event(evt);
-        e.Skip();
-    });
-
     init_button(IGNORE_RESUME, _L("Ignore this and Resume"));
-    m_button_list[IGNORE_RESUME]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e)
-        {
-            wxCommandEvent evt(EVT_ERROR_DIALOG_BTN_CLICKED);
-            evt.SetInt(IGNORE_RESUME);
-            post_event(evt);
-            e.Skip();
-        });
-
     init_button(PROBLEM_SOLVED_RESUME, _L("Problem Solved and Resume"));
-    m_button_list[PROBLEM_SOLVED_RESUME]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e)
-        {
-            wxCommandEvent evt(EVT_ERROR_DIALOG_BTN_CLICKED);
-            evt.SetInt(PROBLEM_SOLVED_RESUME);
-            post_event(evt);
-            e.Skip();
-        });
-
     init_button(STOP_BUZZER, _L("Stop Buzzer"));
-    m_button_list[STOP_BUZZER]->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e)
-        {
-            wxCommandEvent evt(EVT_ERROR_DIALOG_BTN_CLICKED);
-            evt.SetInt(STOP_BUZZER);
-            post_event(evt);
-            e.Skip();
-        });
+    init_button(RETRY_PROBLEM_SOLVED, _L("Retry (problem solved)"));
 }
 
 PrintErrorDialog::~PrintErrorDialog()
@@ -1402,9 +1303,9 @@ void ConfirmBeforeSendDialog::update_text(std::vector<ConfirmBeforeSendInfo> tex
         if (enable_warning_clr && text.level == ConfirmBeforeSendInfo::InfoLevel::Warning) {
             label_item->SetForegroundColour(wxColour(0xFF, 0x6F, 0x00));
         }
-        label_item->SetMaxSize(wxSize(FromDIP(500), -1));
-        label_item->SetMinSize(wxSize(FromDIP(500), -1));
-        label_item->Wrap(FromDIP(500));
+        label_item->SetMaxSize(wxSize(FromDIP(494), -1));
+        label_item->SetMinSize(wxSize(FromDIP(494), -1));
+        label_item->Wrap(FromDIP(494));
         label_item->Layout();
         sizer_text_release_note->Add(label_item, 0, wxALIGN_CENTER | wxALL, FromDIP(3));
         height += label_item->GetSize().y;
@@ -1412,9 +1313,9 @@ void ConfirmBeforeSendDialog::update_text(std::vector<ConfirmBeforeSendInfo> tex
 
     m_vebview_release_note->Layout();
     if (height < FromDIP(500))
-        m_vebview_release_note->SetMinSize(wxSize(FromDIP(500), height + FromDIP(25)));
+        m_vebview_release_note->SetMinSize(wxSize(-1, height + FromDIP(25)));
     else {
-        m_vebview_release_note->SetMinSize(wxSize(FromDIP(500), FromDIP(500)));
+        m_vebview_release_note->SetMinSize(wxSize(-1, FromDIP(500)));
     }
 
     Layout();
@@ -1523,6 +1424,8 @@ void ConfirmBeforeSendDialog::rescale()
     m_button_ok->Rescale();
     m_button_cancel->Rescale();
 }
+
+static void nop_deleter(InputIpAddressDialog*) {}
 
 InputIpAddressDialog::InputIpAddressDialog(wxWindow *parent)
     : DPIDialog(static_cast<wxWindow *>(wxGetApp().mainframe),
@@ -1658,9 +1561,11 @@ InputIpAddressDialog::InputIpAddressDialog(wxWindow *parent)
     }
 
     m_input_sn_area->Add(m_tips_sn, 0, wxALIGN_CENTER, 0);
+    m_input_sn_area->Add(0, 0, 0, wxLEFT, FromDIP(20));
     m_input_sn_area->Add(m_tips_modelID, 0, wxALIGN_CENTER, 0);
 
     m_input_modelID_area->Add(m_input_sn, 0, wxALIGN_CENTER, 0);
+    m_input_modelID_area->Add(0, 0, 0, wxLEFT, FromDIP(20));
     m_input_modelID_area->Add(m_input_modelID, 0, wxALIGN_CENTER, 0);
 
     m_input_bot_sizer->Add(m_input_sn_area, 0,  wxEXPAND, 0);
@@ -1971,6 +1876,8 @@ void InputIpAddressDialog::on_ok(wxMouseEvent& evt)
     Refresh();
     Layout();
     Fit();
+
+    token_.reset(this, nop_deleter);
     m_thread = new boost::thread(boost::bind(&InputIpAddressDialog::workerThreadFunc, this, str_ip, str_access_code, str_sn, str_model_id));
 }
 
@@ -2065,8 +1972,10 @@ void InputIpAddressDialog::update_test_msg_event(wxCommandEvent& evt)
     Fit();
 }
 
-void InputIpAddressDialog::post_update_test_msg(wxString text, bool beconnect)
+void InputIpAddressDialog::post_update_test_msg(std::weak_ptr<InputIpAddressDialog> w,wxString text, bool beconnect)
 {
+    if (w.expired()) return;
+
     wxCommandEvent event(EVT_UPDATE_TEXT_MSG);
     event.SetEventObject(this);
     event.SetString(text);
@@ -2076,7 +1985,9 @@ void InputIpAddressDialog::post_update_test_msg(wxString text, bool beconnect)
 
 void InputIpAddressDialog::workerThreadFunc(std::string str_ip, std::string str_access_code, std::string sn, std::string model_id)
 {
-    post_update_test_msg(_L("connecting..."), true);
+    std::weak_ptr<InputIpAddressDialog> w = std::weak_ptr<InputIpAddressDialog>(token_);
+
+    post_update_test_msg(w, _L("connecting..."), true);
 
     detectResult detectData;
     auto result = -1;
@@ -2096,13 +2007,15 @@ void InputIpAddressDialog::workerThreadFunc(std::string str_ip, std::string str_
         detectData.connect_type = "free";
     }
 
+    if (w.expired()) return;
+  
     if (result < 0) {
-        post_update_test_msg(wxEmptyString, true);
+        post_update_test_msg(w, wxEmptyString, true);
         if (result == -1) {
-            post_update_test_msg(_L("Failed to connect to printer."), false);
+            post_update_test_msg(w, _L("Failed to connect to printer."), false);
         }
         else if (result == -2) {
-            post_update_test_msg(_L("Failed to publish login request."), false);
+            post_update_test_msg(w, _L("Failed to publish login request."), false);
         }
         else if (result == -3) {
             wxCommandEvent event(EVT_CHECK_IP_ADDRESS_LAYOUT);
@@ -2113,21 +2026,27 @@ void InputIpAddressDialog::workerThreadFunc(std::string str_ip, std::string str_
         return;
     }
 
-    if (detectData.bind_state == "occupied") {
-        post_update_test_msg(wxEmptyString, true);
-        post_update_test_msg(_L("The printer has already been bound."), false);
-        return;
-    }
+    if (detectData.connect_type != "farm") {
+        if (detectData.bind_state == "occupied") {
+            post_update_test_msg(w, wxEmptyString, true);
+            post_update_test_msg(w, _L("The printer has already been bound."), false);
+            return;
+        }
 
-    if (detectData.connect_type == "cloud") {
-        post_update_test_msg(wxEmptyString, true);
-        post_update_test_msg(_L("The printer mode is incorrect, please switch to LAN Only."), false);
-        return;
+        if (detectData.connect_type == "cloud") {
+            post_update_test_msg(w, wxEmptyString, true);
+            post_update_test_msg(w, _L("The printer mode is incorrect, please switch to LAN Only."), false);
+            return;
+        }
     }
+    if (w.expired()) return;
+
 
     DeviceManager* dev = wxGetApp().getDeviceManager();
     m_obj = dev->insert_local_device(detectData.dev_name, detectData.dev_id, str_ip, detectData.connect_type, detectData.bind_state, detectData.version, str_access_code);
 
+
+    if (w.expired()) return;
 
     if (m_obj) {
         m_obj->set_user_access_code(str_access_code);
@@ -2137,8 +2056,10 @@ void InputIpAddressDialog::workerThreadFunc(std::string str_ip, std::string str_
 
     closeCount = 1;
 
-    post_update_test_msg(wxEmptyString, true);
-    post_update_test_msg(wxString::Format(_L("Connecting to printer... The dialog will close later"), closeCount), true);
+    post_update_test_msg(w, wxEmptyString, true);
+    post_update_test_msg(w, wxString::Format(_L("Connecting to printer... The dialog will close later"), closeCount), true);
+
+    if (w.expired()) return;
 
 #ifdef __APPLE__
     wxCommandEvent event(EVT_CLOSE_IPADDRESS_DLG);
@@ -2233,7 +2154,6 @@ void InputIpAddressDialog::on_text(wxCommandEvent &evt)
 
 InputIpAddressDialog::~InputIpAddressDialog()
 {
-
 }
 
 void InputIpAddressDialog::on_dpi_changed(const wxRect& suggested_rect)

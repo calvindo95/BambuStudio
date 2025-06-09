@@ -385,23 +385,9 @@ BoundingBoxf3 GLGizmoAdvancedCut::get_bounding_box() const
     t_aabb.reset();
 
     // rotate aabb
-    if (m_is_dragging) {
-        auto t_rotate_aabb = GLGizmoRotate3D::get_bounding_box();
-        if (t_rotate_aabb.defined) {
-            t_aabb.merge(t_rotate_aabb);
-            t_aabb.defined = true;
-        }
-    }
-    else {
-        const auto t_x_aabb = m_gizmos[X].get_bounding_box();
-        t_aabb.merge(t_x_aabb);
-
-        const auto t_y_aabb = m_gizmos[Y].get_bounding_box();
-        t_aabb.merge(t_y_aabb);
-
-        const auto t_z_aabb = m_gizmos[Z].get_bounding_box();
-        t_aabb.merge(t_z_aabb);
-
+    auto t_rotate_aabb = GLGizmoRotate3D::get_bounding_box();
+    if (t_rotate_aabb.defined) {
+        t_aabb.merge(t_rotate_aabb);
         t_aabb.defined = true;
     }
     // end rotate aabb
@@ -539,6 +525,7 @@ void GLGizmoAdvancedCut::on_save(cereal::BinaryOutputArchive &ar) const
 
 void GLGizmoAdvancedCut::data_changed(bool is_serializing)
 {
+    reset_rotation();
     if (m_hover_id < 0) { // BBL
         update_bb();
         if (auto oc = m_c->object_clipper()) {
@@ -633,11 +620,11 @@ void GLGizmoAdvancedCut::on_start_dragging()
     if (m_connectors_editing && m_hover_id >= c_connectors_group_id) {
         Plater::TakeSnapshot snapshot(wxGetApp().plater(), "Move connector");
         return;
-    } else if (m_hover_id <= 2) {
-        for (auto gizmo : m_gizmos) {
+    } else if (m_hover_id >= 0 && m_hover_id <= 2) {
+        for (auto& gizmo : m_gizmos) {
             if (m_hover_id == gizmo.get_group_id()) {
                 gizmo.start_dragging();
-                return;
+                break;
             }
         }
         m_rotate_angle = 0;
@@ -664,9 +651,15 @@ void GLGizmoAdvancedCut::on_stop_dragging()
         return;
     }
     m_is_dragging = false;
-    if (m_hover_id == X || m_hover_id == Y || m_hover_id == Z) {
+    if (m_hover_id >= 0 && m_hover_id <= 2) {
         Plater::TakeSnapshot snapshot(wxGetApp().plater(), "Rotate cut plane");
         m_start_dragging_m = m_rotate_matrix; // for takeshot
+        for (auto& gizmo : m_gizmos) {
+            if (m_hover_id == gizmo.get_group_id()) {
+                gizmo.stop_dragging();
+                break;
+            }
+        }
     } else if (m_hover_id == c_cube_z_move_id || m_hover_id == c_cube_x_move_id || m_hover_id == c_plate_move_id) {
         Plater::TakeSnapshot snapshot(wxGetApp().plater(), "Move cut plane"); // todo
         m_ar_plane_center = m_plane_center;
@@ -709,13 +702,16 @@ void GLGizmoAdvancedCut::on_update(const UpdateData& data)
     m_is_dragging = true;
     if (m_hover_id <= 2) { // drag rotate
         GLGizmoRotate3D::on_update(data);
-        Vec3d rotation;
+        Vec3d rotation{ 0.0f, 0.0f, 0.0f };
         for (int i = 0; i < 3; i++) {
-            rotation(i) = m_gizmos[i].get_angle();
-            if (rotation(i) < 0) rotation(i) = 2 * PI + rotation(i);
-            if (rotation(i) != 0) { m_rotate_angle = rotation(i); }
+            if (m_gizmos[i].is_dragging()) {
+                rotation(i) = m_gizmos[i].get_angle();
+                if (rotation(i) < 0) rotation(i) = 2 * PI + rotation(i);
+                m_rotate_angle = rotation(i);
+                break;
+            }
         }
-        const Transform3d rotation_tmp = Geometry::rotation_transform(rotation) * m_start_dragging_m;
+        const Transform3d rotation_tmp = m_start_dragging_m * Geometry::rotation_transform(rotation);
         // deal rotate
         if (!is_approx(rotation, Vec3d(0, 0, 0))) {
             update_plate_normal_boundingbox_clipper(rotation_tmp);
@@ -1037,7 +1033,7 @@ void GLGizmoAdvancedCut::perform_cut(const Selection& selection)
                     if (its_num_open_edges(new_objects[i]->volumes[j]->mesh().its) > 0) {
                         if (!is_showed_dialog) {
                             is_showed_dialog = true;
-                            MessageDialog dlg(nullptr, _L("non-manifold edges be caused by cut tool, do you want to fix it now?"), "", wxYES | wxCANCEL);
+                            MessageDialog dlg(nullptr, _L("non-manifold edges be caused by cut tool, do you want to fix it now?"), "", wxYES | wxNO);
                             int           ret = dlg.ShowModal();
                             if (ret == wxID_YES) {
                                 user_fix_model = true;
@@ -1159,7 +1155,7 @@ Vec3d GLGizmoAdvancedCut::get_plane_center() const {
     return m_plane_center;
 }
 
-void GLGizmoAdvancedCut::finish_rotation()
+void GLGizmoAdvancedCut::reset_rotation()
 {
     for (int i = 0; i < 3; i++) {
         m_gizmos[i].set_angle(0.);
@@ -2004,7 +2000,6 @@ void GLGizmoAdvancedCut::update_bb()
         m_groove.flaps_angle = m_groove.flaps_angle_init = float(PI) / 3.f;
         m_groove.angle = m_groove.angle_init = 0.f;
         m_plane.reset();
-
         clear_selection();
         if (CommonGizmosDataObjects::SelectionInfo *selection = m_c->selection_info(); selection && selection->model_object())
             m_selected.resize(selection->model_object()->cut_connectors.size(), false);
@@ -2847,7 +2842,7 @@ PartSelection::PartSelection(
 
         for (const Vec3f &v : volume->mesh().its.vertices) {
             double p = (v - pos).dot(norm);
-            if (std::abs(p) > EPSILON) {
+            if (std::abs(p) > 0.01) { // 0.01 mm is enough
                 m_cut_parts[i].is_up_part = p > 0.;
                 break;
             }

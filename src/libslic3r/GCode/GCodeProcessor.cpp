@@ -317,6 +317,7 @@ void GCodeProcessor::TimeMachine::reset()
     std::fill(roles_time.begin(), roles_time.end(), 0.0f);
     layers_time = std::vector<float>();
     prepare_time = 0.0f;
+    m_additional_time_buffer.clear();
 }
 
 void GCodeProcessor::TimeMachine::simulate_st_synchronize(float additional_time, ExtrusionRole target_role, block_handler_t block_handler)
@@ -404,13 +405,43 @@ void GCodeProcessor::TimeMachine::handle_time_block(const TimeBlock& block, floa
     result.moves[block.move_id].time[activate_machine_idx] = time;
 }
 
+GCodeProcessor::TimeMachine::AdditionalBuffer GCodeProcessor::TimeMachine::merge_adjacent_addtional_time_blocks(const AdditionalBuffer& buffer)
+{
+    AdditionalBuffer merged;
+    if(buffer.empty())
+        return merged;
+
+    auto current_block = buffer.front();
+    for(size_t idx = 1; idx < buffer.size(); ++idx){
+        auto next_block = buffer[idx];
+        if(current_block.first == next_block.first){
+            current_block.second += next_block.second;
+        }else{
+            merged.push_back(current_block);
+            current_block = next_block;
+        }
+    }
+    merged.push_back(current_block);
+    return merged;
+}
+
+
 void GCodeProcessor::TimeMachine::calculate_time(size_t keep_last_n_blocks, float additional_time, ExtrusionRole target_role, block_handler_t block_handler)
 {
-    if (!enabled || blocks.size() < 2)
+    if(!enabled)
         return;
+    if(blocks.size() < 2){
+        if (additional_time > 0)
+            m_additional_time_buffer.emplace_back(target_role, additional_time);
+        return ;
+    }
 
     assert(keep_last_n_blocks <= blocks.size());
 
+    AdditionalBuffer additional_buffer = m_additional_time_buffer;
+    if(additional_time > 0)
+        additional_buffer.emplace_back(target_role, additional_time);
+    additional_buffer = merge_adjacent_addtional_time_blocks(additional_buffer);
     // forward_pass
     for (size_t i = 0; i + 1 < blocks.size(); ++i) {
         planner_forward_pass_kernel(blocks[i], blocks[i + 1]);
@@ -423,15 +454,21 @@ void GCodeProcessor::TimeMachine::calculate_time(size_t keep_last_n_blocks, floa
     recalculate_trapezoids(blocks);
 
     size_t n_blocks_process = blocks.size() - keep_last_n_blocks;
-    bool found_target_block = false;
+    size_t additional_buffer_idx = 0;
+
     for (size_t i = 0; i < n_blocks_process; ++i) {
         const TimeBlock& block = blocks[i];
         float block_time = block.time();
 
-        bool is_valid_block = target_role == ExtrusionRole::erNone || target_role == block.role || i == n_blocks_process - 1;
-        if (!found_target_block && is_valid_block) {
-            block_time += additional_time;
-            found_target_block = true;
+        if(additional_buffer_idx < additional_buffer.size()){
+            ExtrusionRole buf_role = additional_buffer[additional_buffer_idx].first;
+            float buf_time = additional_buffer[additional_buffer_idx].second;
+            bool is_valid_block = (buf_role == ExtrusionRole::erNone) ||
+                                  (buf_role == block.role);
+            if (is_valid_block){
+                block_time += buf_time;
+                additional_buffer_idx += 1;
+            }
         }
 
         time += block_time;
@@ -463,6 +500,10 @@ void GCodeProcessor::TimeMachine::calculate_time(size_t keep_last_n_blocks, floa
         if (it_stop_time != stop_times.end() && it_stop_time->g1_line_id == block.g1_line_id)
             it_stop_time->elapsed_time = time;
     }
+
+    m_additional_time_buffer.clear();
+    if(additional_buffer_idx<additional_buffer.size())
+        m_additional_time_buffer.insert(m_additional_time_buffer.end(), additional_buffer.begin() + additional_buffer_idx, additional_buffer.end());
 
     if (keep_last_n_blocks)
         blocks.erase(blocks.begin(), blocks.begin() + n_blocks_process);
@@ -565,6 +606,7 @@ void GCodeProcessor::TimeProcessor::post_process(const std::string& filename, st
     // do not insert gcode into machine start & end gcode
     unsigned int machine_start_gcode_end_line_id = (unsigned int)(-1); // mark the end line of machine start gcode
     unsigned int machine_end_gcode_start_line_id = (unsigned int)(-1); // mark the start line of machine end gcode
+    std::vector<std::pair<unsigned int, unsigned int>> skippable_blocks;
 
     // keeps track of last exported pair <percent, remaining time>
     std::array<std::pair<int, int>, static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Count)> last_exported_main;
@@ -695,6 +737,13 @@ void GCodeProcessor::TimeProcessor::post_process(const std::string& filename, st
             }
             else if (line == reserved_tag(ETags::MachineEndGCodeStart)) {
                 machine_end_gcode_start_line_id = line_id;
+            }
+            else if (line == custom_tags(CustomETags::SKIPPABLE_START)){
+                skippable_blocks.emplace_back(0,0);
+                skippable_blocks.back().first = line_id;
+            }
+            else if (line == custom_tags(CustomETags::SKIPPABLE_END)){
+                skippable_blocks.back().second = line_id;
             }
         }
 
@@ -967,7 +1016,7 @@ void GCodeProcessor::TimeProcessor::post_process(const std::string& filename, st
     gcode_process(in, out, filename_in, filename_out, gcode_time_handler, nullptr, buffer_size_in_KB);
 
     // updates moves' gcode ids which have been modified by the insertion of the M73 lines
-    handle_offsets_of_first_process(offsets, moves, filament_blocks, extruder_blocks, machine_start_gcode_end_line_id, machine_end_gcode_start_line_id);
+    handle_offsets_of_first_process(offsets, moves, filament_blocks, extruder_blocks, skippable_blocks, machine_start_gcode_end_line_id, machine_end_gcode_start_line_id);
 
     // If not initialized, use the time from the previous move.
     {
@@ -1054,6 +1103,7 @@ void GCodeProcessor::TimeProcessor::post_process(const std::string& filename, st
             context.pre_cooling_temp,
             context.cooling_rate,
             context.heating_rate,
+            skippable_blocks,
             machine_start_gcode_end_line_id,
             machine_end_gcode_start_line_id
         );
@@ -1124,7 +1174,14 @@ void GCodeProcessor::TimeProcessor::post_process(const std::string& filename, st
     }
 }
 
-void GCodeProcessor::TimeProcessor::handle_offsets_of_first_process(const std::vector<std::pair<unsigned int, unsigned int>>& offsets, std::vector<GCodeProcessorResult::MoveVertex>& moves, std::vector<ExtruderPreHeating::FilamentUsageBlock>& filament_blocks, std::vector<ExtruderPreHeating::ExtruderUsageBlcok>& extruder_blocks, unsigned int& machine_start_gcode_end_line_id, unsigned int& machine_end_gcode_start_line_id)
+void GCodeProcessor::TimeProcessor::handle_offsets_of_first_process(
+    const std::vector<std::pair<unsigned int, unsigned int>>& offsets,
+    std::vector<GCodeProcessorResult::MoveVertex>& moves,
+    std::vector<ExtruderPreHeating::FilamentUsageBlock>& filament_blocks,
+    std::vector<ExtruderPreHeating::ExtruderUsageBlcok>& extruder_blocks,
+    std::vector<std::pair<unsigned int, unsigned int>>& skippable_blocks,
+    unsigned int& machine_start_gcode_end_line_id,
+    unsigned int& machine_end_gcode_start_line_id)
 {
     // process moves
     {
@@ -1166,6 +1223,11 @@ void GCodeProcessor::TimeProcessor::handle_offsets_of_first_process(const std::v
         block.end_id += get_offset_before_line_id(block.end_id);
         block.post_extrusion_start_id += get_offset_before_line_id(block.post_extrusion_start_id);
         block.post_extrusion_end_id += get_offset_before_line_id(block.post_extrusion_end_id);
+    }
+
+    for(auto& block: skippable_blocks){
+        block.first += get_offset_before_line_id(block.first);
+        block.second += get_offset_before_line_id(block.second);
     }
 
     machine_start_gcode_end_line_id += get_offset_before_line_id(machine_start_gcode_end_line_id);
@@ -2709,7 +2771,7 @@ bool GCodeProcessor::get_last_z_from_gcode(const std::string& gcode_str, double&
             line_str.erase(line_str.find_last_not_of(" ") + 1);
 
             //command which may have z movement
-            if (line_str.size() > 5 && (line_str.find("G0 ") == 0
+            if (line_str.size() > 4 && (line_str.find("G0 ") == 0
                                        || line_str.find("G1 ") == 0
                                        || line_str.find("G2 ") == 0
                                        || line_str.find("G3 ") == 0))
@@ -5380,6 +5442,16 @@ void GCodeProcessor::process_T(const std::string_view command)
 }
 
 
+void GCodeProcessor::init_filament_maps_and_nozzle_type_when_import_only_gcode()
+{
+    if (m_filament_maps.empty()) {
+        m_filament_maps.assign((int) EnforcerBlockerType::ExtruderMax, 1);
+    }
+    if (m_result.nozzle_type.empty()) {
+        m_result.nozzle_type.assign((int) EnforcerBlockerType::ExtruderMax, NozzleType::ntUndefine);
+    }
+}
+
 void GCodeProcessor::process_filament_change(int id)
 {
     assert(id < m_result.filaments_count);
@@ -5802,7 +5874,7 @@ void GCodeProcessor::update_slice_warnings()
     warning.params.clear();
     warning.level=1;
 
-    std::vector<int>nozzle_hrc_lists(m_result.nozzle_type.size(), 0);
+    std::vector<int> nozzle_hrc_lists(m_result.nozzle_type.size(), 0);
     // store the nozzle hrc of each extruder
     for (size_t idx = 0; idx < m_result.nozzle_type.size(); ++idx)
         nozzle_hrc_lists[idx] = Print::get_hrc_by_nozzle_type(m_result.nozzle_type[idx]);
@@ -5963,19 +6035,75 @@ void GCodeProcessor::PreCoolingInjector::inject_cooling_heating_command(TimeProc
         return a.gcode_id < gcode_id;
         };
 
+    auto find_skip_block_end = [&skippable_blocks = this->skippable_blocks](unsigned int gcode_id) -> unsigned int{
+        auto it = std::upper_bound(
+            skippable_blocks.begin(), skippable_blocks.end(), gcode_id,
+            [](unsigned int id, const std::pair<unsigned int, unsigned int>&block) { return id < block.first; }
+        );
+        if (it != skippable_blocks.begin()) {
+            auto candidate = std::prev(it);
+            if (gcode_id >= candidate->first && gcode_id <= candidate->second)
+                return candidate->second;
+        }
+        return 0;
+    };
+
+    auto find_skip_block_start = [&skippable_blocks = this->skippable_blocks](unsigned int gcode_id) -> unsigned int {
+        auto it = std::upper_bound(
+            skippable_blocks.begin(), skippable_blocks.end(), gcode_id,
+            [](unsigned int id, const std::pair<unsigned int, unsigned int>&block) { return id < block.first; }
+        );
+        if (it != skippable_blocks.begin()) {
+            auto candidate = std::prev(it);
+            if (gcode_id >= candidate->first && gcode_id <= candidate->second)
+                return candidate->first;
+        }
+        return 0;
+    };
+
+    auto adjust_iter = [&](std::vector<GCodeProcessorResult::MoveVertex>::const_iterator iter,
+                       const std::vector<GCodeProcessorResult::MoveVertex>::const_iterator& begin,
+                       const std::vector<GCodeProcessorResult::MoveVertex>::const_iterator& end,
+                       bool forward) -> std::vector<GCodeProcessorResult::MoveVertex>::const_iterator
+    {
+        if (forward) {
+            while (iter != end) {
+                unsigned current_id = iter->gcode_id;
+                unsigned skip_block_end = find_skip_block_end(current_id);
+                if(skip_block_end == 0)
+                    break;
+                iter = std::lower_bound(iter, end, skip_block_end + 1, gcode_move_comp);
+            }
+        }
+        else {
+            while (iter != begin) {
+                unsigned current_id = iter->gcode_id;
+                unsigned skip_block_start = find_skip_block_start(current_id);
+                if(skip_block_start == 0)
+                    break;
+                auto new_iter = std::lower_bound(begin, iter, skip_block_start, gcode_move_comp);
+                if(new_iter == begin)
+                    break;
+                iter = std::prev(new_iter);
+            }
+        }
+        return iter;
+    };
+
     if (!pre_cooling && !pre_heating && block.free_upper_gcode_id <= block.free_lower_gcode_id)
         return;
 
     auto move_iter_lower = std::lower_bound(moves.begin(), moves.end(), block.free_lower_gcode_id, gcode_move_comp);
     auto move_iter_upper = std::lower_bound(moves.begin(), moves.end(), block.free_upper_gcode_id, gcode_move_comp); // closed iter
-    if (move_iter_lower == moves.end() || move_iter_upper == moves.end() || move_iter_upper == moves.begin())
+
+    if (move_iter_lower == moves.end() || move_iter_upper == moves.begin())
         return;
     --move_iter_upper;
 
     auto partial_free_move_lower = std::lower_bound(moves.begin(), moves.end(), block.partial_free_lower_id, gcode_move_comp);
     auto partial_free_move_upper = std::lower_bound(moves.begin(), moves.end(), block.partial_free_upper_id, gcode_move_comp); // closed iter
 
-    if (partial_free_move_lower == moves.end() || partial_free_move_upper == moves.end() || partial_free_move_upper == moves.begin())
+    if (partial_free_move_lower == moves.end() || partial_free_move_upper == moves.begin())
         return;
     --partial_free_move_upper;
 
@@ -5997,11 +6125,9 @@ void GCodeProcessor::PreCoolingInjector::inject_cooling_heating_command(TimeProc
     float ext_cooling_rate = cooling_rate[block.extruder_id];
 
     if (apply_cooling_when_partial_free) {
-        if (partial_free_move_lower < partial_free_move_upper) {
-            float max_cooling_temp = std::min(curr_temp, std::min(get_partial_free_cooling_thres(block.last_filament_id), partial_free_time_gap * ext_cooling_rate));
-            curr_temp -= max_cooling_temp; // set the temperature after doing cooling when post-extruding
-            inserted_operation_lines[partial_free_move_lower->gcode_id].emplace_back(format_line_M104(curr_temp, block.extruder_id, "Multi extruder pre cooling in post extrusion"), TimeProcessor::InsertLineType::PreCooling);
-        }
+        float max_cooling_temp = std::min(curr_temp, std::min(get_partial_free_cooling_thres(block.last_filament_id), partial_free_time_gap * ext_cooling_rate));
+        curr_temp -= max_cooling_temp; // set the temperature after doing cooling when post-extruding
+        inserted_operation_lines[block.partial_free_lower_id].emplace_back(format_line_M104(curr_temp, block.extruder_id, "Multi extruder pre cooling in post extrusion"), TimeProcessor::InsertLineType::PreCooling);
     }
 
     if (pre_cooling && !pre_heating) {
@@ -6017,11 +6143,12 @@ void GCodeProcessor::PreCoolingInjector::inject_cooling_heating_command(TimeProc
             return;
         float heating_start_time = move_iter_upper->time[valid_machine_id] - (target_temp - curr_temp) / ext_heating_rate;
         auto heating_move_iter = std::upper_bound(move_iter_lower, move_iter_upper + 1, heating_start_time, [valid_machine_id = this->valid_machine_id](float time, const GCodeProcessorResult::MoveVertex& a) {return time < a.time[valid_machine_id]; });
-        if (heating_move_iter == move_iter_upper + 1 || heating_move_iter == move_iter_lower) {
+        if (heating_move_iter == move_iter_lower) {
             inserted_operation_lines[block.free_lower_gcode_id].emplace_back(format_line_M104(target_temp, block.extruder_id, "Multi extruder pre heating"), TimeProcessor::InsertLineType::PreHeating);
         }
         else {
             --heating_move_iter;
+            heating_move_iter = adjust_iter(heating_move_iter, move_iter_lower, move_iter_upper, false);
             inserted_operation_lines[heating_move_iter->gcode_id].emplace_back(format_line_M104(target_temp, block.extruder_id, "Multi extruder pre heating"), TimeProcessor::InsertLineType::PreHeating);
         }
         return;
@@ -6031,10 +6158,11 @@ void GCodeProcessor::PreCoolingInjector::inject_cooling_heating_command(TimeProc
     float heating_temp = target_temp - mid_temp;
     float heating_start_time = move_iter_upper->time[valid_machine_id] - heating_temp / ext_heating_rate;
     auto heating_move_iter = std::upper_bound(move_iter_lower, move_iter_upper + 1, heating_start_time, [valid_machine_id = this->valid_machine_id](float time, const GCodeProcessorResult::MoveVertex& a) {return time < a.time[valid_machine_id]; });
-    if (heating_move_iter == move_iter_lower || heating_move_iter == move_iter_upper + 1)
+    if (heating_move_iter == move_iter_lower)
         return;
-
     --heating_move_iter;
+    heating_move_iter = adjust_iter(heating_move_iter, move_iter_lower, move_iter_upper, false);
+
     // get the insert pos of heat cmd and recalculate time gap and delta temp
     float real_cooling_time = heating_move_iter->time[valid_machine_id] - move_iter_lower->time[valid_machine_id];
     int real_delta_temp = std::min((int)(real_cooling_time * ext_cooling_rate), (int)curr_temp);

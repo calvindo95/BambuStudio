@@ -513,6 +513,10 @@ void ImGuiWrapper::new_frame()
 
     ImGuiIO& io = ImGui::GetIO();
 
+    ImGui::NewFrame();
+    m_new_frame_open = true;
+
+    // BBL: we should render the new frame first, than reset keys' status
     // BBL: copy & paste form prusa github repo (https://github.com/prusa3d/PrusaSlicer/blob/master/src/slic3r/GUI/ImGuiWrapper.cpp#L375C5-L402C6)
     // synchronize key states
     // when the application loses the focus it may happen that the key up event is not processed
@@ -543,9 +547,6 @@ void ImGuiWrapper::new_frame()
     }
 
     // BBL: end copy & paste
-
-    ImGui::NewFrame();
-    m_new_frame_open = true;
 }
 
 void ImGuiWrapper::render()
@@ -793,6 +794,7 @@ bool ImGuiWrapper::bbl_slider_float(const std::string& label, float* v, float v_
     bool ret = ImGui::BBLSliderFloat(str_label.c_str(), v, v_min, v_max, format, power);
 
     m_last_slider_status.hovered = ImGui::IsItemHovered();
+    m_last_slider_status.edited = ImGui::IsItemEdited();
     m_last_slider_status.clicked = ImGui::IsItemClicked();
     m_last_slider_status.deactivated_after_edit = ImGui::IsItemDeactivatedAfterEdit();
 
@@ -1134,6 +1136,10 @@ void ImGuiWrapper::tooltip(const char *label, float wrap_width)
     ImGui::PopStyleColor(1);
     ImGui::PopTextWrapPos();
     ImGui::EndTooltip();
+}
+
+void ImGuiWrapper::tooltip(const std::string &label, float wrap_width) {
+    tooltip(label.c_str(), wrap_width);
 }
 
 void ImGuiWrapper::tooltip(const wxString &label, float wrap_width)

@@ -320,6 +320,7 @@ void HistoryWindow::sync_history_data() {
     auto title_name = new Label(m_history_data_panel, _L("Name"));
     title_name->SetFont(Label::Head_14);
     gbSizer->Add(title_name, {0, get_colume_idx(CaliColumnType::Cali_Name, curr_obj) }, {1, 1}, wxBOTTOM, FromDIP(15));
+    BOOST_LOG_TRIVIAL(info) << "=====================" << title_name->GetLabelText().ToStdString();
 
     auto title_preset_name = new Label(m_history_data_panel, _L("Filament"));
     title_preset_name->SetFont(Label::Head_14);
@@ -363,9 +364,6 @@ void HistoryWindow::sync_history_data() {
 
         wxString preset_name = get_preset_name_by_filament_id(result.filament_id);
         auto preset_name_value = new Label(m_history_data_panel, preset_name);
-
-        wxString nozzle_name = get_nozzle_volume_type_name(result.nozzle_volume_type);
-        auto     nozzle_name_label = new Label(m_history_data_panel, nozzle_name);
 
         auto k_str = wxString::Format("%.3f", result.k_value);
         auto n_str = wxString::Format("%.3f", result.n_coef);
@@ -423,8 +421,11 @@ void HistoryWindow::sync_history_data() {
 
         gbSizer->Add(name_value, {i, get_colume_idx(CaliColumnType::Cali_Name, curr_obj)}, {1, 1}, wxBOTTOM, FromDIP(15));
         gbSizer->Add(preset_name_value, {i, get_colume_idx(CaliColumnType::Cali_Filament, curr_obj)}, {1, 1}, wxBOTTOM, FromDIP(15));
-        if (curr_obj && curr_obj->is_multi_extruders())
+        if (curr_obj && curr_obj->is_multi_extruders()) {
+            wxString nozzle_name       = get_nozzle_volume_type_name(result.nozzle_volume_type);
+            auto     nozzle_name_label = new Label(m_history_data_panel, nozzle_name);
             gbSizer->Add(nozzle_name_label, {i, get_colume_idx(CaliColumnType::Cali_Nozzle, curr_obj)}, {1, 1}, wxBOTTOM, FromDIP(15));
+        }
         gbSizer->Add(k_value, {i, get_colume_idx(CaliColumnType::Cali_K_Value, curr_obj)}, {1, 1}, wxBOTTOM, FromDIP(15));
         //gbSizer->Add(n_value, { i, 3 }, { 1, 1 }, wxBOTTOM, FromDIP(15));
         gbSizer->Add(delete_button, {i, get_colume_idx(CaliColumnType::Cali_Delete, curr_obj)}, {1, 1}, wxBOTTOM, FromDIP(15));
@@ -491,6 +492,7 @@ EditCalibrationHistoryDialog::EditCalibrationHistoryDialog(wxWindow             
     : DPIDialog(parent, wxID_ANY, _L("Edit Flow Dynamics Calibration"), wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE)
     , m_new_result(result)
     , m_history_results(history_results)
+    , m_old_name(result.name)
 {
     curr_obj = obj;
 
@@ -617,21 +619,23 @@ void EditCalibrationHistoryDialog::on_save(wxCommandEvent& event) {
     m_k_value->GetTextCtrl()->SetValue(k_str);
     m_new_result.k_value = k;
 
-    auto iter = std::find_if(m_history_results.begin(), m_history_results.end(), [this](const PACalibResult &item) {
-        bool has_same_name = item.name == m_new_result.name && item.filament_id == m_new_result.filament_id;
-        if (curr_obj && curr_obj->is_multi_extruders()) {
-            has_same_name &= (item.extruder_id == m_new_result.extruder_id && item.nozzle_volume_type == m_new_result.nozzle_volume_type);
-        }
-        return has_same_name;
-    });
+    if (m_new_result.name != m_old_name) {
+        auto iter = std::find_if(m_history_results.begin(), m_history_results.end(), [this](const PACalibResult &item) {
+            bool has_same_name = item.name == m_new_result.name && item.filament_id == m_new_result.filament_id;
+            if (curr_obj && curr_obj->is_multi_extruders()) {
+                has_same_name &= (item.extruder_id == m_new_result.extruder_id && item.nozzle_volume_type == m_new_result.nozzle_volume_type);
+            }
+            return has_same_name;
+        });
 
-    if (iter != m_history_results.end()) {
-        wxString duplicate_name_info = wxString::Format(
-            _L("Within the same extruder, the name '%s' must be unique when the filament type, nozzle diameter, and nozzle flow are identical. Please choose a different name."),
-            m_new_result.name);
-        MessageDialog msg_dlg(nullptr, duplicate_name_info, wxEmptyString, wxICON_WARNING | wxOK);
-        msg_dlg.ShowModal();
-        return;
+        if (iter != m_history_results.end()) {
+            wxString duplicate_name_info = wxString::Format(_L("Within the same extruder, the name '%s' must be unique when the filament type, nozzle diameter, and nozzle flow "
+                                                               "are identical. Please choose a different name."),
+                                                            m_new_result.name);
+            MessageDialog msg_dlg(nullptr, duplicate_name_info, wxEmptyString, wxICON_WARNING | wxOK);
+            msg_dlg.ShowModal();
+            return;
+        }
     }
 
     EndModal(wxID_OK);

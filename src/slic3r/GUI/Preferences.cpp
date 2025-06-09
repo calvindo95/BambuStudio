@@ -327,7 +327,7 @@ wxBoxSizer *PreferencesDialog::create_item_region_combobox(wxString title, wxWin
         NetworkAgent* agent = wxGetApp().getAgent();
         AppConfig* config = GUI::wxGetApp().app_config;
         if (agent) {
-            MessageDialog msg_wingow(this, _L("Changing the region will log out your account.\n") + "\n" + _L("Do you want to continue?"), L("Region selection"),
+            MessageDialog msg_wingow(this, _L("Changing the region will log out your account.\n") + "\n" + _L("Do you want to continue?"), _L("Region selection"),
                                      wxICON_QUESTION | wxOK | wxCANCEL);
             if (msg_wingow.ShowModal() == wxID_CANCEL) {
                 combobox->SetSelection(current_region);
@@ -748,6 +748,7 @@ wxBoxSizer *PreferencesDialog::create_item_checkbox(wxString title, wxWindow *pa
                     agent->track_remove_files();
                 }
             }
+            wxGetApp().save_privacy_policy_history(checkbox->GetValue(), "preferences");
             app_config->save();
         }
         else if (param == "auto_stop_liveview") {
@@ -900,13 +901,6 @@ wxBoxSizer *PreferencesDialog::create_item_checkbox(wxString title, wxWindow *pa
                 }
             }
         }
-
-#ifdef __WIN32__
-        if (param == "prefer_to_use_dgpu") {
-            app_config->set_bool(param, checkbox->GetValue());
-            app_config->save();
-        }
-#endif // __WIN32__
         e.Skip();
     });
 
@@ -1228,11 +1222,6 @@ wxWindow* PreferencesDialog::create_general_page()
                                                          _L("Improved rendering performance under the scene of multiple plates and many models."), 50,
                                                          "enable_lod");
 
-#ifdef __WIN32__
-    auto prefer_to_use_dgpu   = create_item_checkbox(_L("Prefer to use high performance GPU (Effective after manual restart Bambu Studio)"), page,
-                                                    _L("If enabled, this feature can improve rendering performance to some extent. However, it may cause flickering on multi-GPU systems, so it is recommended to disable it."), 50, "prefer_to_use_dgpu.");
-#endif // __WIN32__
-
     float range_min = 1.0, range_max = 2.5;
     auto item_grabber_size_settings = create_item_range_input(_L("Grabber scale"), page,
                                                               _L("Set grabber size for move,rotate,scale tool.") + _L("Value range") + ":[" + std::to_string(range_min) + "," +
@@ -1328,9 +1317,6 @@ wxWindow* PreferencesDialog::create_general_page()
     sizer_page->Add(item_show_shells_in_preview_settings, 0, wxTOP, FromDIP(3));
     sizer_page->Add(item_import_single_svg_and_split, 0, wxTOP, FromDIP(3));
     sizer_page->Add(item_gamma_correct_in_import_obj, 0, wxTOP, FromDIP(3));
-#ifdef __WIN32__
-    sizer_page->Add(prefer_to_use_dgpu, 0, wxTOP, FromDIP(3));
-#endif // __WIN32__
 
     sizer_page->Add(enable_lod_settings, 0, wxTOP, FromDIP(3));
     sizer_page->Add(item_grabber_size_settings, 0, wxTOP, FromDIP(3));

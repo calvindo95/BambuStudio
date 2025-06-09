@@ -4,6 +4,7 @@
 #include "../I18N.hpp"
 #include "../GUI_App.hpp"
 
+#include "slic3r/GUI/MsgDialog.hpp"
 #include "slic3r/GUI/DeviceTab/uiAmsHumidityPopup.h"
 
 #include <wx/simplebook.h>
@@ -39,7 +40,6 @@ AMSControl::AMSControl(wxWindow *parent, wxWindowID id, const wxPoint &pos, cons
     wxBoxSizer *m_sizer_body = new wxBoxSizer(wxVERTICAL);
     m_amswin                 = new wxWindow(this, wxID_ANY);
     m_amswin->SetBackgroundColour(*wxWHITE);
-    //m_amswin->SetBackgroundColour(wxColour(0x00CED1));
     m_amswin->SetSize(wxSize(FromDIP(578), -1));
     m_amswin->SetMinSize(wxSize(FromDIP(578), -1));
 
@@ -284,8 +284,8 @@ AMSControl::AMSControl(wxWindow *parent, wxWindowID id, const wxPoint &pos, cons
 
                 wxPoint img_pos = ClientToScreen(wxPoint(0, 0));
                 wxPoint popup_pos(img_pos.x - m_percent_humidity_dry_popup->GetSize().GetWidth() + FromDIP(150), img_pos.y - FromDIP(80));
-                m_percent_humidity_dry_popup->Position(popup_pos, wxSize(0, 0));
-                m_percent_humidity_dry_popup->Popup();
+                m_percent_humidity_dry_popup->Move(popup_pos);
+                m_percent_humidity_dry_popup->ShowModal();
             }
             else
             {
@@ -1130,6 +1130,7 @@ AMSRoadShowMode AMSControl::findFirstMode(AMSPanelPos pos) {
             }
         }
         if (item->second->get_ams_model() == AMSModel::EXT_AMS && item->second->get_ext_type() == AMSModelOriginType::LITE_EXT) return AMSRoadShowMode::AMS_ROAD_MODE_AMS_LITE;
+        if (item->second->get_ams_model() == AMSModel::N3S_AMS) return AMSRoadShowMode::AMS_ROAD_MODE_SINGLE_N3S;
         return AMSRoadShowMode::AMS_ROAD_MODE_SINGLE;
     }
 }
@@ -1400,6 +1401,10 @@ void AMSControl::SwitchAms(std::string ams_id)
                     }
                     else {
                         AMSRoadShowMode mode = AMSRoadShowMode::AMS_ROAD_MODE_SINGLE;
+
+                        if (item->get_ams_model() == AMSModel::N3S_AMS)
+                            mode = AMSRoadShowMode::AMS_ROAD_MODE_SINGLE_N3S;
+
                         for (auto it : pair_id) {
                             if (it.first == ams_id || it.second == ams_id) {
                                 mode = AMSRoadShowMode::AMS_ROAD_MODE_DOUBLE;
@@ -1460,19 +1465,17 @@ bool AMSControl::Enable(bool enable)
     return wxWindow::Enable(enable);
 }
 
-void AMSControl::SetExtruder(bool on_off, std::string ams_id, std::string slot_id)
+void AMSControl::SetExtruder(bool on_off, int nozzle_id, std::string ams_id, std::string slot_id)
 {
     AmsItem *item = nullptr;
     if (m_ams_item_list.find(ams_id) != m_ams_item_list.end()) { item = m_ams_item_list[ams_id]; }
 
-    if (!item) {
-        return;
-    }
-    if (!on_off) {
-        m_extruder->OnAmsLoading(false, item->get_nozzle_id());
-    } else {
+    if (on_off && item) {
         auto col = item->GetTagColr(slot_id);
-        m_extruder->OnAmsLoading(true, item->get_nozzle_id(), col);
+        m_extruder->OnAmsLoading(true, nozzle_id, col);
+    }
+    else {
+        m_extruder->OnAmsLoading(false, nozzle_id);
     }
 }
 
@@ -1521,9 +1524,10 @@ void AMSControl::SetAmsStep(std::string ams_id, std::string canid, AMSPassRoadTy
     }
 
     //Set path length in different case
+    model  = ams->get_ams_model();
+
     if (ams->get_can_count() == GENERIC_AMS_SLOT_NUM) {
         length = left ? 129 : 145;
-        model  = ams->get_ams_model();
     } else if (ams->get_can_count() == 1) {
         for (auto it : pair_id){
             if (it.first == ams_id){
@@ -1537,8 +1541,12 @@ void AMSControl::SetAmsStep(std::string ams_id, std::string canid, AMSPassRoadTy
                 break;
             }
         }
-        model = ams->get_ams_model();
+
+        if (!in_pair && model == N3S_AMS) {
+            length = left ? 129 : 232;
+        }
     }
+
     if (model == AMSModel::AMS_LITE){
         length = left ? 145 : 45;
     }
@@ -1641,6 +1649,16 @@ void AMSControl::SetAmsStep(std::string ams_id, std::string canid, AMSPassRoadTy
 
 void AMSControl::on_filament_load(wxCommandEvent &event)
 {
+    /*If the filament is unknown, show warning*/
+    const auto& filament_id = get_filament_id(m_current_ams, GetCurrentCan(m_current_ams));
+    if (filament_id.empty())
+    {
+        MessageDialog msg_dlg(nullptr, _L("Filament type is unknown which is required to perform this action. Please set target filament's informations."),
+                              wxEmptyString, wxICON_WARNING | wxOK);
+        msg_dlg.ShowModal();
+        return;
+    }
+
     m_button_extruder_back->Disable();
     for (auto i = 0; i < m_ams_info.size(); i++) {
         if (m_ams_info[i].ams_id == m_current_ams) { m_ams_info[i].current_action = AMSAction::AMS_ACTION_LOAD; }
@@ -1690,6 +1708,37 @@ void AMSControl::parse_object(MachineObject* obj) {
         info.parse_ams_info(obj, ams.second);
         m_ams_info.push_back(info);
     }
+}
+
+std::string AMSControl::get_filament_id(const std::string& ams_id, const std::string& can_id)
+{
+    for (const auto& ams_info : m_ams_info)
+    {
+        if (ams_info.ams_id == m_current_ams)
+        {
+            bool found = false;
+            const auto& can_info = ams_info.get_caninfo(this->GetCurrentCan(m_current_ams), found);
+            if (found)
+            {
+                return can_info.filament_id;
+            }
+        }
+    }
+
+    for (const auto& ext_info : m_ext_info)
+    {
+        if (ext_info.ams_id == m_current_ams)
+        {
+            bool found = false;
+            const auto& can_info = ext_info.get_caninfo(this->GetCurrentCan(m_current_ams), found);
+            if (found)
+            {
+                return can_info.filament_id;
+            }
+        }
+    }
+
+    return std::string();
 }
 
 void AMSControl::on_clibration_again_click(wxMouseEvent &event) { post_event(SimpleEvent(EVT_AMS_CLIBRATION_AGAIN)); }

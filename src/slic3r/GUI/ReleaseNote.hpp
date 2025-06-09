@@ -46,11 +46,7 @@ wxDECLARE_EVENT(EVT_SECONDARY_CHECK_CANCEL, wxCommandEvent);
 wxDECLARE_EVENT(EVT_SECONDARY_CHECK_RETRY, wxCommandEvent);
 wxDECLARE_EVENT(EVT_SECONDARY_CHECK_DONE, wxCommandEvent);
 wxDECLARE_EVENT(EVT_SECONDARY_CHECK_RESUME, wxCommandEvent);
-wxDECLARE_EVENT(EVT_PRINT_ERROR_STOP, wxCommandEvent);
 wxDECLARE_EVENT(EVT_UPDATE_NOZZLE, wxCommandEvent);
-wxDECLARE_EVENT(EVT_LOAD_VAMS_TRAY, wxCommandEvent);
-wxDECLARE_EVENT(EVT_JUMP_TO_HMS, wxCommandEvent);
-wxDECLARE_EVENT(EVT_JUMP_TO_LIVEVIEW, wxCommandEvent);
 wxDECLARE_EVENT(EVT_UPDATE_TEXT_MSG, wxCommandEvent);
 wxDECLARE_EVENT(EVT_ERROR_DIALOG_BTN_CLICKED, wxCommandEvent);
 
@@ -185,10 +181,12 @@ public:
 
         NO_REMINDER_NEXT_TIME = 23,
         IGNORE_NO_REMINDER_NEXT_TIME = 25,
-        //LOAD_FILAMENT = 26, /*TODO*/
+        //LOAD_FILAMENT = 26*/
         IGNORE_RESUME = 27,
         PROBLEM_SOLVED_RESUME = 28,
         STOP_BUZZER = 29,
+
+        RETRY_PROBLEM_SOLVED = 34,
 
         ERROR_BUTTON_COUNT
     };
@@ -291,6 +289,7 @@ public:
     wxString comfirm_after_enter_text;
     wxString comfirm_last_enter_text;
 
+    std::shared_ptr<InputIpAddressDialog> token_;
     boost::thread* m_thread{nullptr};
 
     std::string m_ip;
@@ -343,7 +342,7 @@ public:
     void on_ok(wxMouseEvent& evt);
     void on_send_retry();
     void update_test_msg_event(wxCommandEvent &evt);
-    void post_update_test_msg(wxString text, bool beconnect);
+    void post_update_test_msg(std::weak_ptr<InputIpAddressDialog> w, wxString text, bool beconnect);
     void workerThreadFunc(std::string str_ip, std::string str_access_code, std::string sn, std::string model_id);
     void OnTimer(wxTimerEvent& event);
     void on_text(wxCommandEvent& evt);

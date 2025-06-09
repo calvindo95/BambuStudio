@@ -18,6 +18,8 @@
 #include "Widgets/Button.hpp"
 #include "Widgets/CheckBox.hpp"
 #include "CapsuleButton.hpp"
+#include "PrePrintChecker.hpp"
+
 using namespace Slic3r;
 using namespace Slic3r::GUI;
 
@@ -114,60 +116,9 @@ void SyncAmsInfoDialog::updata_ui_data_after_connected_printer() {
     m_button_cancel->Show();
 }
 
-void SyncAmsInfoDialog::update_ams_check(MachineObject *obj)
-{
-    if (!obj) { return; }
-
-    if (!obj->is_enable_np) {
-        if (obj->has_ams()) {
-            //m_checkbox_list["use_ams"]->Show();
-            m_checkbox_list["use_ams"]->setValue("on");
-        } else {
-            m_checkbox_list["use_ams"]->Hide();
-            //m_checkbox_list["use_ams"]->setValue("off");
-        }
-    } else {
-        m_checkbox_list["use_ams"]->Hide();
-        m_checkbox_list["use_ams"]->setValue("on");
-    }
-}
-
 void SyncAmsInfoDialog::update_select_layout(MachineObject *obj)
 {
-    m_checkbox_list["timelapse"]->Hide();
-    m_checkbox_list["bed_leveling"]->Hide();
     m_checkbox_list["use_ams"]->Hide();
-    m_checkbox_list["nozzle_offset_cali"]->Hide();
-
-    if (!obj) { return; }
-    AppConfig *config = wxGetApp().app_config;
-
-    if (obj->is_enable_np) {
-        m_checkbox_list["nozzle_offset_cali"]->Show();
-        m_checkbox_list["nozzle_offset_cali"]->update_options(ops_auto);
-        m_checkbox_list["bed_leveling"]->update_options(ops_auto);
-
-        m_checkbox_list["nozzle_offset_cali"]->setValue("auto");
-        m_checkbox_list["bed_leveling"]->setValue("auto");
-    } else {
-        m_checkbox_list["bed_leveling"]->update_options(ops_no_auto);
-
-        if (config && config->get("print", "bed_leveling") == "0") {
-            m_checkbox_list["bed_leveling"]->setValue("off");
-        } else {
-            m_checkbox_list["bed_leveling"]->setValue("on");
-        }
-    }
-
-    update_timelapse_enable_status();
-
-    if (config && config->get("print", "timelapse") == "0") {
-        m_checkbox_list["timelapse"]->setValue("off");
-    } else {
-        m_checkbox_list["timelapse"]->setValue("on");
-    }
-    Layout();
-    Fit();
 }
 
 void SyncAmsInfoDialog::set_default_normal(const ThumbnailData &data)
@@ -400,18 +351,13 @@ void SyncAmsInfoDialog::update_map_when_change_map_mode()
         if (m_ams_combo_info.empty()) {
             wxGetApp().preset_bundle->get_ams_cobox_infos(m_ams_combo_info);
         }
-        for (size_t i = 0; i < m_preview_colors_in_thumbnail.size(); i++) {
-            if (i < m_ams_combo_info.ams_filament_colors.size()) {
-                auto result                  = decode_ams_color(m_ams_combo_info.ams_filament_colors[i]);
-                if (i < m_cur_colors_in_thumbnail.size()) {
-                    m_cur_colors_in_thumbnail[i] = result;
-                }
-            }
-            else {
-                if (!m_cur_colors_in_thumbnail.empty()) {
-                    // todo:give warning
-                    m_cur_colors_in_thumbnail[i] = m_cur_colors_in_thumbnail[0];
-                }
+        for (size_t i = 0; i < m_ams_combo_info.ams_filament_colors.size(); i++) {
+            auto result = decode_ams_color(m_ams_combo_info.ams_filament_colors[i]);
+            if (i < m_cur_colors_in_thumbnail.size()) {
+                m_cur_colors_in_thumbnail[i] = result;
+            } else {
+                m_cur_colors_in_thumbnail.resize(i + 1);
+                m_cur_colors_in_thumbnail[i] = result;
             }
         }
     }
@@ -549,7 +495,6 @@ void SyncAmsInfoDialog::add_two_image_control()
         m_right_image_button = new wxButton(m_two_image_panel, wxID_ANY, {}, wxDefaultPosition,
                                             wxSize(FromDIP(RIGHT_THUMBNAIL_SIZE_WIDTH), FromDIP(RIGHT_THUMBNAIL_SIZE_WIDTH)),
                                             wxBORDER_NONE | wxBU_AUTODRAW);
-        m_right_image_button->SetToolTip(_L("If the transparency of the mapping changes, this thumbnail is for reference only."));
         m_right_sizer_thumbnail = create_sizer_thumbnail(m_right_image_button, false);
         m_two_image_panel_sizer->Add(m_right_sizer_thumbnail, FromDIP(0), wxALIGN_LEFT | wxEXPAND | wxRIGHT | wxTOP | wxBOTTOM, FromDIP(8));
         m_two_image_panel->SetSizer(m_two_image_panel_sizer);
@@ -753,19 +698,18 @@ SyncAmsInfoDialog::SyncAmsInfoDialog(wxWindow *parent, SyncInfo &info) :
         m_mode_combox_sizer = new wxBoxSizer(wxHORIZONTAL);
         m_colormap_btn      = new CapsuleButton(m_scrolledWindow, PageType::ptColorMap, _L("Mapping"), true);
         m_override_btn      = new CapsuleButton(m_scrolledWindow, PageType::ptOverride, _L("Overwriting"), false);
-        m_mode_combox_sizer->AddSpacer(FromDIP(25));
-        m_mode_combox_sizer->AddStretchSpacer();
+        m_mode_combox_sizer->AddSpacer(SyncAmsInfoDialogWidth / 2.0f - FromDIP(8) / 2.0f - m_colormap_btn->GetSize().GetX());
         m_mode_combox_sizer->Add(m_colormap_btn, 0, wxALIGN_CENTER | wxEXPAND | wxALL, FromDIP(2));
         m_mode_combox_sizer->AddSpacer(FromDIP(8));
         m_mode_combox_sizer->Add(m_override_btn, 0, wxALIGN_CENTER | wxEXPAND | wxALL, FromDIP(2));
-        m_mode_combox_sizer->AddStretchSpacer();
+        m_mode_combox_sizer->AddSpacer(SyncAmsInfoDialogWidth / 2.0f - FromDIP(8) / 2.0f - m_override_btn->GetSize().GetX() - FromDIP(60));
         m_reset_all_btn = new ScalableButton(m_scrolledWindow, wxID_ANY, "reset_gray", wxEmptyString, wxDefaultSize, wxDefaultPosition, wxBU_EXACTFIT | wxNO_BORDER,
                                                         true, 14);
         m_reset_all_btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent &e) { reset_all_ams_info(); });
         m_reset_all_btn->SetBackgroundColour(*wxWHITE);
         m_reset_all_btn->SetToolTip(_L("Reset all filament mapping"));
-        m_mode_combox_sizer->Add(m_reset_all_btn, 0, wxALIGN_CENTER | wxEXPAND | wxALL, FromDIP(2));
-        m_mode_combox_sizer->AddSpacer(FromDIP(30));
+
+        m_mode_combox_sizer->Add(m_reset_all_btn, 0, wxALIGN_LEFT | wxEXPAND | wxALL, FromDIP(2));
 
         m_colormap_btn->Bind(wxEVT_BUTTON, &SyncAmsInfoDialog::update_when_change_map_mode,this); // update_when_change_map_mode(e.GetSelection());
         m_override_btn->Bind(wxEVT_BUTTON, &SyncAmsInfoDialog::update_when_change_map_mode,this);
@@ -921,11 +865,6 @@ SyncAmsInfoDialog::SyncAmsInfoDialog(wxWindow *parent, SyncInfo &info) :
 
     auto option_use_ams = new PrintOption(m_options_other, _L("Use AMS"), wxEmptyString, ops_no_auto);
 
-    option_use_ams->Bind(EVT_SWITCH_PRINT_OPTION, [this](auto &e) {
-        m_ams_mapping_result.clear();
-        sync_ams_mapping_result(m_ams_mapping_result);
-    });
-
     option_use_ams->setValue("on");
     m_sizer_options_timelapse->Add(option_timelapse, 0, wxEXPAND  | wxBOTTOM, FromDIP(5));
     m_sizer_options_other->Add(option_use_ams, 0, wxEXPAND  | wxBOTTOM, FromDIP(5));
@@ -1000,7 +939,7 @@ SyncAmsInfoDialog::SyncAmsInfoDialog(wxWindow *parent, SyncInfo &info) :
         m_append_color_checkbox->Hide();
         m_append_color_sizer->Add(m_append_color_checkbox, 0, wxALIGN_LEFT | wxTOP, FromDIP(4));
         const int gap_between_checebox_and_text = 2;
-        m_append_color_text                     = new wxStaticText(m_scrolledWindow, wxID_ANY, _L("Add unused AMS filaments to filaments list."));
+        m_append_color_text                     = new Label(m_scrolledWindow, _L("Add unused AMS filaments to filaments list."));
         m_append_color_text->Hide();
         m_append_color_sizer->AddSpacer(FromDIP(gap_between_checebox_and_text));
         m_append_color_sizer->Add(m_append_color_text, 0, wxALIGN_LEFT | wxTOP, FromDIP(4));
@@ -1021,7 +960,7 @@ SyncAmsInfoDialog::SyncAmsInfoDialog(wxWindow *parent, SyncInfo &info) :
         m_merge_color_sizer->Add(m_merge_color_checkbox, 0, wxALIGN_LEFT | wxTOP, FromDIP(2));
 
 
-        m_merge_color_text = new wxStaticText(m_scrolledWindow, wxID_ANY, _L("Automatically merge the same colors in the model after mapping."));
+        m_merge_color_text = new Label(m_scrolledWindow, _L("Automatically merge the same colors in the model after mapping."));
         m_merge_color_text->Hide();
         m_merge_color_sizer->AddSpacer(FromDIP(gap_between_checebox_and_text));
         m_merge_color_sizer->Add(m_merge_color_text, 0, wxALIGN_LEFT | wxTOP, FromDIP(2));
@@ -1148,6 +1087,7 @@ void SyncAmsInfoDialog::reinit_dialog()
     m_ams_mapping_res   = false;
     m_ams_mapping_valid = false;
     m_ams_mapping_result.clear();
+    m_preview_colors_in_thumbnail.clear();
 
     show_status(PrintDialogStatus::PrintStatusInit);
     update_show_status();
@@ -1156,7 +1096,6 @@ void SyncAmsInfoDialog::reinit_dialog()
 void SyncAmsInfoDialog::init_bind()
 {
     Bind(wxEVT_TIMER, &SyncAmsInfoDialog::on_timer, this);
-    Bind(EVT_CLEAR_IPADDRESS, &SyncAmsInfoDialog::clear_ip_address_config, this);
     Bind(EVT_SHOW_ERROR_INFO, [this](auto &e) { show_print_failed_info(true); });
     Bind(EVT_UPDATE_USER_MACHINE_LIST, &SyncAmsInfoDialog::update_printer_combobox, this);
     Bind(EVT_PRINT_JOB_CANCEL, &SyncAmsInfoDialog::on_print_job_cancel, this);
@@ -1320,11 +1259,11 @@ bool SyncAmsInfoDialog::do_ams_mapping(MachineObject *obj_)
         std::string ams_array2;
         std::string mapping_info;
         get_ams_mapping_result(ams_array, ams_array2, mapping_info);
+        sync_ams_mapping_result(m_ams_mapping_result);
         if (ams_array.empty()) {
             reset_ams_material();
             BOOST_LOG_TRIVIAL(info) << "ams_mapping_array=[]";
         } else {
-            sync_ams_mapping_result(m_ams_mapping_result);
             BOOST_LOG_TRIVIAL(info) << "ams_mapping_array=" << ams_array;
             BOOST_LOG_TRIVIAL(info) << "ams_mapping_array2=" << ams_array2;
             BOOST_LOG_TRIVIAL(info) << "ams_mapping_info=" << mapping_info;
@@ -1781,35 +1720,17 @@ void SyncAmsInfoDialog::update_print_error_info(int code, std::string msg, std::
     m_print_error_extra = extra;
 }
 
-bool SyncAmsInfoDialog::has_tips(MachineObject *obj)
-{
-    if (!obj) return false;
-
-    // must set to a status if return true
-    if (m_checkbox_list["timelapse"]->IsShown() && (m_checkbox_list["timelapse"]->getValue() == "on")) {
-        if (obj->get_sdcard_state() == MachineObject::SdcardState::NO_SDCARD) {
-            show_status(PrintDialogStatus::PrintStatusTimelapseNoSdcard);
-            return true;
-        }
-    }
-
-    return false;
-}
-
 void SyncAmsInfoDialog::show_status(PrintDialogStatus status, std::vector<wxString> params)
 {
     if (m_print_status != status) {
         m_result.is_same_printer = true;
-        BOOST_LOG_TRIVIAL(info) << "select_machine_dialog: show_status = " << status << "(" << get_print_status_info(status) << ")";
+        BOOST_LOG_TRIVIAL(info) << "select_machine_dialog: show_status = " << status << "(" << PrePrintChecker::get_print_status_info(status) << ")";
     }
     m_print_status = status;
 
     // other
     if (status == PrintDialogStatus::PrintStatusInit) {
         update_print_status_msg(wxEmptyString, false, false);
-    } else if (status == PrintDialogStatus::PrintStatusNoUserLogin) {
-        wxString msg_text = _L("No login account, only printers in LAN mode are displayed");
-        update_print_status_msg(msg_text, false, true);
     } else if (status == PrintDialogStatus::PrintStatusInvalidPrinter) {
         update_print_status_msg(wxEmptyString, true, true);
     } else if (status == PrintDialogStatus::PrintStatusConnectingServer) {
@@ -1832,15 +1753,6 @@ void SyncAmsInfoDialog::show_status(PrintDialogStatus status, std::vector<wxStri
     } else if (status == PrintDialogStatus::PrintStatusInPrinting) {
         wxString msg_text = _L("The printer is busy on other print job");
         update_print_status_msg(msg_text, true, true);
-    } else if (status == PrintDialogStatus::PrintStatusDisableAms) {
-        update_print_status_msg(wxEmptyString, false, false);
-    } else if (status == PrintDialogStatus::PrintStatusNeedUpgradingAms) {
-        wxString msg_text;
-        if (params.size() > 0)
-            msg_text = wxString::Format(_L("Filament %s exceeds the number of AMS slots. Please update the printer firmware to support AMS slot assignment."), params[0]);
-        else
-            msg_text = _L("Filament exceeds the number of AMS slots. Please update the printer firmware to support AMS slot assignment.");
-        update_print_status_msg(msg_text, true, false);
     } else if (status == PrintDialogStatus::PrintStatusAmsMappingSuccess) {
         update_print_status_msg(wxEmptyString, false, false);
     } else if (status == PrintDialogStatus::PrintStatusAmsMappingInvalid) {
@@ -1861,8 +1773,6 @@ void SyncAmsInfoDialog::show_status(PrintDialogStatus status, std::vector<wxStri
                                         params[0], params[1]);
         else
             msg_text = _L("Filament does not match the filament in AMS slot. Please update the printer firmware to support AMS slot assignment.");
-    } else if (status == PrintDialogStatus::PrintStatusAmsMappingValid) {
-        update_print_status_msg(wxEmptyString, false, false);
     } else if (status == PrintDialogStatus::PrintStatusRefreshingMachineList) {
         update_print_status_msg(wxEmptyString, false, true);
     } else if (status == PrintDialogStatus::PrintStatusSending) {
@@ -1873,9 +1783,6 @@ void SyncAmsInfoDialog::show_status(PrintDialogStatus status, std::vector<wxStri
     } else if (status == PrintDialogStatus::PrintStatusLanModeSDcardNotAvailable) {
         wxString msg_text = _L("Storage is not available or is in read-only mode.");
         update_print_status_msg(msg_text, true, true);
-    } else if (status == PrintDialogStatus::PrintStatusAmsMappingByOrder) {
-        wxString msg_text = _L("The printer firmware only supports sequential mapping of filament => AMS slot.");
-        update_print_status_msg(msg_text, false, false);
     } else if (status == PrintDialogStatus::PrintStatusNoSdcard) {
         wxString msg_text = _L("Storage needs to be inserted before printing.");
         update_print_status_msg(msg_text, true, true);
@@ -2114,46 +2021,16 @@ void SyncAmsInfoDialog::show_errors(wxString &info)
     confirm_dlg.on_show();
 }
 
-wxString SyncAmsInfoDialog::format_steel_name(NozzleType type)
-{
-    if (type == NozzleType::ntHardenedSteel) {
-        return _L("Hardened Steel");
-    } else if (type == NozzleType::ntStainlessSteel) {
-        return _L("Stainless Steel");
-    }
-
-    return wxEmptyString;
-}
-
 void SyncAmsInfoDialog::Enable_Auto_Refill(bool enable)
 {
     if (!m_ams_backup_tip) { return; }
     if (enable) {
-        m_ams_backup_tip->SetForegroundColour(wxColour(0x00AE42));
+        m_ams_backup_tip->SetForegroundColour(wxColour("#00AE42"));
     } else {
         m_ams_backup_tip->SetForegroundColour(wxColour(0x90, 0x90, 0x90));
     }
     m_ams_backup_tip->Refresh();
 }
-
-void SyncAmsInfoDialog::connect_printer_mqtt()
-{
-    DeviceManager *dev = Slic3r::GUI::wxGetApp().getDeviceManager();
-    if (!dev) return;
-    MachineObject *obj_ = dev->get_selected_machine();
-
-    if (obj_->connection_type() == "cloud") {
-        show_status(PrintDialogStatus::PrintStatusSending);
-#if !BBL_RELEASE_TO_PUBLIC
-        obj_->connect(false, wxGetApp().app_config->get("enable_ssl_for_mqtt") == "true" ? true : false);
-#else
-        obj_->connect(false, obj_->local_use_ssl_for_mqtt);
-#endif
-
-    }
-}
-
-void SyncAmsInfoDialog::clear_ip_address_config(wxCommandEvent &e) { prepare_mode(); }
 
 void SyncAmsInfoDialog::update_user_machine_list()
 {
@@ -2373,7 +2250,6 @@ void SyncAmsInfoDialog::on_timer(wxTimerEvent &event)
 
     if (!m_check_flag && obj_->is_info_ready()) {
         update_select_layout(obj_);
-        update_ams_check(obj_);
         m_check_flag = true;
     }
 
@@ -2408,7 +2284,6 @@ void SyncAmsInfoDialog::update_show_status()
     NetworkAgent * agent = Slic3r::GUI::wxGetApp().getAgent();
     DeviceManager *dev   = Slic3r::GUI::wxGetApp().getDeviceManager();
     if (!agent) {
-        update_ams_check(nullptr);
         return;
     }
     if (!dev) return;
@@ -2417,12 +2292,9 @@ void SyncAmsInfoDialog::update_show_status()
     if (is_must_finish_slice_then_connected_printer()) { return; }
     MachineObject * obj_ = dev->get_selected_machine();
     if (!obj_) {
-        update_ams_check(nullptr);
         if (agent) {
             if (agent->is_user_login()) {
                 show_status(PrintDialogStatus::PrintStatusInvalidPrinter);
-            } else {
-                show_status(PrintDialogStatus::PrintStatusNoUserLogin);
             }
         }
         return;
@@ -2460,22 +2332,13 @@ void SyncAmsInfoDialog::update_show_status()
     }
 
     // do ams mapping if no ams result
-    bool clean_ams_mapping = false;
     if (m_ams_mapping_result.empty()) {
-        if (m_checkbox_list.find("use_ams") != m_checkbox_list.end() && m_checkbox_list["use_ams"]->getValue() == "on") {
-            do_ams_mapping(obj_);
-        } else {
-            clean_ams_mapping = true;
-        }
+        do_ams_mapping(obj_);
     }
 
-    if (clean_ams_mapping) {
-        m_ams_mapping_result.clear();
-        sync_ams_mapping_result(m_ams_mapping_result);
-    }
 
     // reading done
-    if (wxGetApp().app_config && wxGetApp().app_config->get("internal_debug").empty()) {
+    if (wxGetApp().app_config) {
         if (obj_->upgrade_force_upgrade) {
             show_status(PrintDialogStatus::PrintStatusNeedForceUpgrading);
             return;
@@ -2513,31 +2376,6 @@ void SyncAmsInfoDialog::update_show_status()
             show_status(PrintDialogStatus::PrintStatusLanModeSDcardNotAvailable);
             return;
         }
-    }
-
-    // no ams
-    if (!obj_->has_ams() || m_checkbox_list["use_ams"]->getValue() != "on") {
-        if (!has_tips(obj_)) {
-            if (has_timelapse_warning()) {
-                show_status(PrintDialogStatus::PrintStatusTimelapseWarning);
-            } else {
-                show_status(PrintDialogStatus::PrintStatusReadingFinished);
-            }
-        }
-        return;
-    }
-
-    if (m_checkbox_list["use_ams"]->getValue() != "on") {
-        m_ams_mapping_result.clear();
-        sync_ams_mapping_result(m_ams_mapping_result);
-
-        if (has_timelapse_warning()) {
-            show_status(PrintDialogStatus::PrintStatusTimelapseWarning);
-        } else {
-            show_status(PrintDialogStatus::PrintStatusDisableAms);
-        }
-
-        return;
     }
 
     // do ams mapping if no ams result
@@ -2599,29 +2437,6 @@ void SyncAmsInfoDialog::update_show_status()
             }
         }
     }
-
-    if (m_ams_mapping_res) {
-        if (has_timelapse_warning()) {
-            show_status(PrintDialogStatus::PrintStatusTimelapseWarning);
-        } else {
-            show_status(PrintDialogStatus::PrintStatusAmsMappingSuccess);
-        }
-        return;
-    } else {
-        if (obj_->is_valid_mapping_result(m_ams_mapping_result)) {
-            if (!has_tips(obj_)) {
-                if (has_timelapse_warning()) {
-                    show_status(PrintDialogStatus::PrintStatusTimelapseWarning);
-                } else {
-                    show_status(PrintDialogStatus::PrintStatusAmsMappingValid);
-                }
-                return;
-            }
-        } else {
-            show_status(PrintDialogStatus::PrintStatusAmsMappingInvalid);
-            return;
-        }
-    }
 }
 
 bool SyncAmsInfoDialog::has_timelapse_warning()
@@ -2667,6 +2482,8 @@ void SyncAmsInfoDialog::reset_all_ams_info()
     for (int i = 0; i < m_ams_mapping_result.size(); i++) {
         reset_one_ams_material(std::to_string(i+1),true);
     }
+    sync_ams_mapping_result(m_ams_mapping_result);
+    update_final_thumbnail_data();
     m_reset_all_btn->Hide();
     Refresh();
 }
@@ -2767,8 +2584,6 @@ void SyncAmsInfoDialog::set_default(bool hide_some)
         if (!hide_some) {
             if (agent->is_user_login()) {
                 show_status(PrintDialogStatus::PrintStatusInit);
-            } else {
-                show_status(PrintDialogStatus::PrintStatusNoUserLogin);
             }
         }
     }
@@ -2942,6 +2757,7 @@ void SyncAmsInfoDialog::reset_and_sync_ams_list()
                     m_mapping_popup.show_reset_button();
                     auto reset_call_back = [this](const std::string &item_index_str) {
                         reset_one_ams_material(item_index_str);
+                        update_final_thumbnail_data();
                         m_mapping_popup.update_items_check_state(m_ams_mapping_result);
                         m_mapping_popup.Refresh();
                         if (!m_reset_all_btn->IsShown()) {
@@ -3154,14 +2970,14 @@ void SyncAmsInfoDialog::generate_override_fix_ams_list()
     m_fix_filament_panel_sizer->Layout();
 }
 
-void SyncAmsInfoDialog::clone_thumbnail_data(bool allow_clone_ams_color)
+void SyncAmsInfoDialog::clone_thumbnail_data()
 {
     // record preview_colors
-    MaterialHash::iterator iter = m_materialList.begin();
-    if (m_preview_colors_in_thumbnail.size() != m_materialList.size()) {
-        m_preview_colors_in_thumbnail.resize(m_materialList.size());
-    }
-    if (allow_clone_ams_color) {
+    if (m_preview_colors_in_thumbnail.empty()) {
+        MaterialHash::iterator iter = m_materialList.begin();
+        if (m_preview_colors_in_thumbnail.size() != m_materialList.size()) {
+            m_preview_colors_in_thumbnail.resize(m_materialList.size());
+        }
         while (iter != m_materialList.end()) {
             int       id                      = iter->first;
             Material *item                    = iter->second;
@@ -3177,7 +2993,11 @@ void SyncAmsInfoDialog::clone_thumbnail_data(bool allow_clone_ams_color)
                         }
                     } else { // exist empty or unrecognized type ams in machine
                         m_cur_colors_in_thumbnail.resize(item->id + 1);
-                        m_cur_colors_in_thumbnail[item->id] = m->m_ams_coloul;
+                        if (m->m_ams_name == "-") {
+                            m_cur_colors_in_thumbnail[item->id] = m->m_material_coloul;
+                        } else {
+                            m_cur_colors_in_thumbnail[item->id] = m->m_ams_coloul;
+                        }
                         m_preview_colors_in_thumbnail.resize(item->id + 1);
                         m_preview_colors_in_thumbnail[item->id] = m->m_material_coloul;
                     }
@@ -3339,6 +3159,11 @@ void SyncAmsInfoDialog::update_thumbnail_data_accord_plate_index(bool allow_clon
     unify_deal_thumbnail_data(input_data, no_light_data, allow_clone_ams_color);
 }
 
+void SyncAmsInfoDialog::update_final_thumbnail_data() {
+    m_preview_colors_in_thumbnail.clear();//to update m_cur_colors_in_thumbnail
+    unify_deal_thumbnail_data(m_cur_input_thumbnail_data, m_cur_no_light_thumbnail_data,false);
+}
+
 void SyncAmsInfoDialog::unify_deal_thumbnail_data(ThumbnailData &input_data, ThumbnailData &no_light_data, bool allow_clone_ams_color)
 {
     if (input_data.width == 0 || input_data.height == 0 || no_light_data.width == 0 || no_light_data.height == 0) {
@@ -3347,8 +3172,7 @@ void SyncAmsInfoDialog::unify_deal_thumbnail_data(ThumbnailData &input_data, Thu
     }
     m_cur_input_thumbnail_data    = input_data;
     m_cur_no_light_thumbnail_data = no_light_data;
-    clone_thumbnail_data(allow_clone_ams_color);
-    MaterialHash::iterator iter               = m_materialList.begin();
+    clone_thumbnail_data();
     if (m_cur_colors_in_thumbnail.size() > 0) {
         change_default_normal(-1, wxColour());
         final_deal_edge_pixels_data(m_preview_thumbnail_data);
@@ -3462,45 +3286,13 @@ void SyncAmsInfoDialog::update_lan_machine_list()
     BOOST_LOG_TRIVIAL(info) << "SyncAmsInfoDialog update_lan_devices end";
 }
 
-std::string SyncAmsInfoDialog::get_print_status_info(PrintDialogStatus status)
-{
-    switch (status) {
-    case PrintStatusInit: return "PrintStatusInit";
-    case PrintStatusNoUserLogin: return "PrintStatusNoUserLogin";
-    case PrintStatusInvalidPrinter: return "PrintStatusInvalidPrinter";
-    case PrintStatusConnectingServer: return "PrintStatusConnectingServer";
-    case PrintStatusReading: return "PrintStatusReading";
-    case PrintStatusReadingFinished: return "PrintStatusReadingFinished";
-    case PrintStatusReadingTimeout: return "PrintStatusReadingTimeout";
-    case PrintStatusInUpgrading: return "PrintStatusInUpgrading";
-    case PrintStatusNeedUpgradingAms: return "PrintStatusNeedUpgradingAms";
-    case PrintStatusInSystemPrinting: return "PrintStatusInSystemPrinting";
-    case PrintStatusInPrinting: return "PrintStatusInPrinting";
-    case PrintStatusDisableAms: return "PrintStatusDisableAms";
-    case PrintStatusAmsMappingSuccess: return "PrintStatusAmsMappingSuccess";
-    case PrintStatusAmsMappingInvalid: return "PrintStatusAmsMappingInvalid";
-    case PrintStatusAmsMappingU0Invalid: return "PrintStatusAmsMappingU0Invalid";
-    case PrintStatusAmsMappingValid: return "PrintStatusAmsMappingValid";
-    case PrintStatusAmsMappingByOrder: return "PrintStatusAmsMappingByOrder";
-    case PrintStatusRefreshingMachineList: return "PrintStatusRefreshingMachineList";
-    case PrintStatusSending: return "PrintStatusSending";
-    case PrintStatusSendingCanceled: return "PrintStatusSendingCanceled";
-    case PrintStatusLanModeNoSdcard: return "PrintStatusLanModeNoSdcard";
-    case PrintStatusLanModeSDcardNotAvailable: return "PrintStatusLanModeSDcardNotAvailable";
-    case PrintStatusNoSdcard: return "PrintStatusNoSdcard";
-    case PrintStatusUnsupportedPrinter: return "PrintStatusUnsupportedPrinter";
-    case PrintStatusTimelapseNoSdcard: return "PrintStatusTimelapseNoSdcard";
-    case PrintStatusNotSupportedPrintAll: return "PrintStatusNotSupportedPrintAll";
-    }
-    return "unknown";
-}
-
 SyncNozzleAndAmsDialog::SyncNozzleAndAmsDialog(InputInfo &input_info)
     : BaseTransparentDPIFrame(static_cast<wxWindow *>(wxGetApp().mainframe),
-                              320,
+                              wxGetApp().preset_bundle->get_printer_extruder_count() == 1 ? 370 :320,
                               input_info.dialog_pos,
                               90,
-                              _L("Successfully synchronized nozzle and AMS number information."),
+                              wxGetApp().preset_bundle->get_printer_extruder_count() == 1 ? _L("Successfully synchronized nozzle information.") :
+                                                                                            _L("Successfully synchronized nozzle and AMS number information."),
                               _L("Continue to sync filaments"),
                               _CTX(L_CONTEXT("Cancel", "Sync_Nozzle_AMS"), "Sync_Nozzle_AMS"),
                               DisappearanceMode::TimedDisappearance)

@@ -37,7 +37,7 @@ class ComboBox;
 class Button;
 
 namespace Slic3r {
-
+class BackgroundSlicingProcess;
 class BuildVolume;
 class Model;
 class ModelObject;
@@ -81,6 +81,7 @@ class PlaterPresetComboBox;
 class PartPlateList;
 class SyncNozzleAndAmsDialog;
 class FinishSyncAmsDialog;
+class Bed3D;
 using t_optgroups = std::vector <std::shared_ptr<ConfigOptionsGroup>>;
 
 class Plater;
@@ -122,17 +123,18 @@ class Sidebar : public wxPanel
     Button *         btn_sync{nullptr};
     ScalableButton *  ams_btn{nullptr};
     bool                                    m_last_slice_state = false;
-    std::shared_ptr<SyncNozzleAndAmsDialog> m_sna_dialog{nullptr};
-    std::shared_ptr<FinishSyncAmsDialog>    m_fna_dialog{nullptr};
+    SyncNozzleAndAmsDialog*                 m_sna_dialog{nullptr};
+    FinishSyncAmsDialog*                    m_fna_dialog{nullptr};
     std::vector<BedType>                    m_cur_combox_bed_types;
     std::string                             m_cur_image_bed_type;
     int                                     m_last_combo_bedtype_count{0};
     bool                                    m_begin_sync_printer_status{false};
-    std::shared_ptr<SyncAmsInfoDialog>      m_sync_dlg{nullptr};
+    SyncAmsInfoDialog*                      m_sync_dlg{nullptr};
 
     void update_sync_ams_btn_enable(wxUpdateUIEvent &e);
 
 public:
+    enum DockingState { None, Left, Right };
     Sidebar(Plater *parent);
     Sidebar(Sidebar &&) = delete;
     Sidebar(const Sidebar &) = delete;
@@ -140,6 +142,8 @@ public:
     Sidebar &operator=(const Sidebar &) = delete;
     ~Sidebar();
 
+    void on_enter_image_printer_bed(wxMouseEvent &evt);
+    void on_leave_image_printer_bed(wxMouseEvent &evt);
     void on_change_color_mode(bool is_dark);
     void create_printer_preset();
     void init_filament_combo(PlaterPresetComboBox **combo, const int filament_idx);
@@ -155,7 +159,7 @@ public:
     BedType get_cur_select_bed_type();
     std::string get_cur_select_bed_image();
     void set_bed_type_accord_combox(BedType bed_type);
-    bool reset_bed_type_combox_choices();
+    bool reset_bed_type_combox_choices(bool is_sidebar_init = false);
     bool use_default_bed_type(bool is_bbl_preset = true);
     void change_top_border_for_mode_sizer(bool increase_border);
     void msw_rescale();
@@ -289,10 +293,12 @@ public:
     Sidebar& sidebar();
     const Model& model() const;
     Model& model();
+    Bed3D& bed();
     const Print& fff_print() const;
     Print& fff_print();
     const SLAPrint& sla_print() const;
     SLAPrint& sla_print();
+    BackgroundSlicingProcess &background_process();
 
     void reset_flags_when_new_or_close_project();
     int new_project(bool skip_confirm = false, bool silent = false, const wxString &project_name = wxString());
@@ -336,7 +342,7 @@ public:
     void set_using_exported_file(bool exported_file) {
         m_exported_file = exported_file;
     }
-
+    bool is_empty_project();
     bool is_multi_extruder_ams_empty();
     // BBS
     wxString get_project_name();
@@ -344,6 +350,8 @@ public:
     void update_obj_preview_thumbnail(ModelObject *, int obj_idx, int vol_idx, std::vector<std::array<float, 4>> colors, int camera_view_angle_type);
     void invalid_all_plate_thumbnails();
     void force_update_all_plate_thumbnails();
+
+    const VendorProfile::PrinterModel *get_curr_printer_model();
 
     static wxColour get_next_color_for_filament();
     static wxString get_slice_warning_string(GCodeProcessorResult::SliceWarning& warning);
@@ -381,9 +389,12 @@ public:
     bool is_view3D_overhang_shown() const;
     void show_view3D_overhang(bool show);
 
+    bool is_sidebar_enabled() const;
+    void enable_sidebar(bool enabled);
     bool is_sidebar_collapsed() const;
     void collapse_sidebar(bool show);
-
+    Sidebar::DockingState get_sidebar_docking_state() const;
+    void                  reset_window_layout(int width = -1);
     // Called after the Preferences dialog is closed and the program settings are saved.
     // Update the UI based on the current preferences.
     void update_ui_from_settings();
@@ -494,7 +505,7 @@ public:
     // BBS: return false if not changed
     bool leave_gizmos_stack();
 
-    void on_filament_change(size_t filament_idx);
+    bool on_filament_change(size_t filament_idx);
     void on_filament_count_change(size_t extruders_count);
     void on_filaments_delete(size_t extruders_count, size_t filament_id, int replace_filament_id = -1);
     std::vector<std::array<float, 4>> get_extruders_colors();
@@ -525,8 +536,8 @@ public:
         EMPTY_FILAMENT
     };
     void pop_warning_and_go_to_device_page(wxString printer_name, PrinterWarningType type, const wxString &title);
-    bool check_printer_initialized(MachineObject *obj, bool only_warning = false);
-    bool is_same_printer_for_connected_and_selected();
+    bool check_printer_initialized(MachineObject *obj, bool only_warning = false,bool popup_warning = true);
+    bool is_same_printer_for_connected_and_selected(bool popup_warning = true);
     bool is_printer_configed_by_BBL();
     // BBS
     //void show_action_buttons(const bool is_ready_to_slice) const;
@@ -557,6 +568,8 @@ public:
     int get_prepare_state();
     //BBS: add print job releated functions
     void get_print_job_data(PrintPrepareData* data);
+    void set_print_job_plate_idx(int plate_idx);
+
     int get_send_calibration_finished_event();
     int get_print_finished_event();
     int get_send_finished_event();
@@ -592,7 +605,7 @@ public:
     //BBS:
     void edit_text();
     bool can_edit_text() const;
-
+    std::string get_3mf_filename() { return m_3mf_path; };
     bool can_delete() const;
     bool can_delete_all() const;
     bool can_add_model() const;
@@ -635,7 +648,6 @@ public:
 #endif
 
     bool init_collapse_toolbar();
-    void enable_collapse_toolbar(bool enable);
 
     const Camera& get_camera() const;
     Camera& get_camera();
@@ -663,6 +675,7 @@ public:
     void update_slicing_context_to_current_partplate();
     //BBS: show object info
     void show_object_info();
+    void show_assembly_info();
     //BBS
     bool show_publish_dialog(bool show = true);
     //BBS: post process string object exception strings by warning types
@@ -688,7 +701,7 @@ public:
 
     const GLToolbar& get_collapse_toolbar() const;
     GLToolbar& get_collapse_toolbar();
-
+    int get_collapse_toolbar_size();
     void update_preview_bottom_toolbar();
     void update_preview_moves_slider();
     void enable_preview_moves_slider(bool enable);
@@ -837,6 +850,7 @@ public:
     static bool has_illegal_filename_characters(const std::string& name);
     static void show_illegal_characters_warning(wxWindow* parent);
 
+
     std::string get_preview_only_filename() { return m_preview_only_filename; };
 
     bool last_arrange_job_is_finished()
@@ -850,7 +864,7 @@ public:
 private:
     struct priv;
     std::unique_ptr<priv> p;
-
+    std::string           m_3mf_path;
     // Set true during PopupMenu() tracking to suppress immediate error message boxes.
     // The error messages are collected to m_tracking_popup_menu_error_message instead and these error messages
     // are shown after the pop-up dialog closes.
