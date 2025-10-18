@@ -18,7 +18,6 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <boost/log/trivial.hpp>
-#include <boost/timer.hpp>
 
 static const float GROUND_Z = -0.04f;
 static const std::array<float, 4> DEFAULT_MODEL_COLOR = { 0.3255f, 0.337f, 0.337f, 1.0f };
@@ -263,38 +262,15 @@ bool Bed3D::set_shape(const Pointfs& printable_area, const double printable_heig
     //m_texture_filename = texture_filename;
     m_model_filename = model_filename;
     std::replace(m_model_filename.begin(), m_model_filename.end(), '\\', '/');
-    //BBS: add part plate logic
-    m_extended_bounding_box = this->calc_extended_bounding_box(false);
-
-    //BBS: add part plate logic
-
     //BBS add default bed
-#if 1
-    ExPolygon poly{ Polygon::new_scale(printable_area) };
-#else
-    ExPolygon poly;
-    for (const Vec2d& p : printable_area) {
-        poly.contour.append(Point(scale_(p(0) + m_position.x()), scale_(p(1) + m_position.y())));
-    }
-#endif
-
-    calc_triangles(poly);
-
-    //no need gridline for 3dbed
-    //const BoundingBox& bed_bbox = poly.contour.bounding_box();
-    //calc_gridlines(poly, bed_bbox);
-
-    //m_polygon = offset(poly.contour, (float)bed_bbox.radius() * 1.7f, jtRound, scale_(0.5))[0];
-
+    m_triangles.reset();
     if (with_reset) {
         this->release_VBOs();
         //m_texture.reset();
         m_model.reset();
     }
     //BBS: add part plate logic, always update model offset
-    //else {
-        update_model_offset();
-    //}
+    update_model_offset();//include m_extended_bounding_box = this->calc_extended_bounding_box();
 
     // Set the origin and size for rendering the coordinate system axes.
     m_axes.set_origin({ 0.0, 0.0, static_cast<double>(GROUND_Z) });
@@ -376,9 +352,9 @@ void Bed3D::render_internal(GLCanvas3D& canvas, bool bottom, float scale_factor,
 
 //BBS: add partplate related logic
 // Calculate an extended bounding box from axes and current model for visualization purposes.
-BoundingBoxf3 Bed3D::calc_extended_bounding_box(bool consider_model_offset) const
+BoundingBoxf3 Bed3D::calc_printable_bounding_box() const
 {
-    BoundingBoxf3 out { m_build_volume.bounding_volume() };
+    BoundingBoxf3 out{m_build_volume.bounding_volume()};
 
     const Vec3d size = out.size();
     // ensures that the bounding box is set as defined or the following calls to merge() will not work as intented
@@ -388,19 +364,22 @@ BoundingBoxf3 Bed3D::calc_extended_bounding_box(bool consider_model_offset) cons
     out.min.z() = 0.0;
     out.max.z() = 0.0;
     // extend to contain axes
-    //BBS: add part plate related logic.
-    Vec3d offset{ m_position.x(), m_position.y(), 0.f };
-    //out.merge(m_axes.get_origin() + offset + m_axes.get_total_length() * Vec3d::Ones());
+    // BBS: add part plate related logic.
+    Vec3d offset{m_position.x(), m_position.y(), 0.f};
+    // out.merge(m_axes.get_origin() + offset + m_axes.get_total_length() * Vec3d::Ones());
     out.merge(Vec3d(0.f, 0.f, GROUND_Z) + offset + m_axes.get_total_length() * Vec3d::Ones());
     out.merge(out.min + Vec3d(-Axes::DefaultTipRadius, -Axes::DefaultTipRadius, out.max.z()));
-    //BBS: add part plate related logic.
-    if (consider_model_offset) {
-        // extend to contain model, if any
-        BoundingBoxf3 model_bb = m_model.get_bounding_box();
-        if (model_bb.defined) {
-            model_bb.translate(m_model_offset);
-            out.merge(model_bb);
-        }
+    return out;
+}
+
+BoundingBoxf3 Bed3D::calc_extended_bounding_box() const
+{
+    BoundingBoxf3 out;
+    out.merge(m_printable_bounding_box);
+    BoundingBoxf3 model_bb = m_model.get_bounding_box();
+    if (model_bb.defined) {
+        model_bb.translate(m_model_offset);
+        out.merge(model_bb);
     }
     return out;
 }
@@ -639,7 +618,8 @@ void Bed3D::update_model_offset() const
     }
 
     // update extended bounding box
-    const_cast<BoundingBoxf3&>(m_extended_bounding_box) = calc_extended_bounding_box();
+    const_cast<BoundingBoxf3 &>(m_printable_bounding_box) = calc_printable_bounding_box();
+    const_cast<BoundingBoxf3 &>(m_extended_bounding_box)  = calc_extended_bounding_box();
 }
 
 void Bed3D::update_bed_triangles()
@@ -673,8 +653,8 @@ void Bed3D::update_bed_triangles()
     ExPolygon poly{ Polygon::new_scale(new_bed_shape) };
     calc_triangles(poly);
     // update extended bounding box
-    const_cast<BoundingBoxf3&>(m_extended_bounding_box) = calc_extended_bounding_box();
-
+    const_cast<BoundingBoxf3 &>(m_printable_bounding_box) = calc_printable_bounding_box();
+    const_cast<BoundingBoxf3 &>(m_extended_bounding_box)  = calc_extended_bounding_box();
 }
 
 void Bed3D::render_model() const
@@ -705,6 +685,9 @@ void Bed3D::render_model() const
             const Matrix3d view_normal_matrix = view_matrix.matrix().block(0, 0, 3, 3) * model_matrix.matrix().block(0, 0, 3, 3).inverse().transpose();
             shader->set_uniform("view_normal_matrix", view_normal_matrix);
             if (m_build_volume.get_extruder_area_count() > 0) {
+                auto printable_area = m_build_volume.printable_area();
+                std::array<float, 4> full_print_volume = {(float)printable_area[0].x(), (float)printable_area[0].y(), (float)printable_area[2].x(), (float)printable_area[2].y()};
+                shader->set_uniform("full_print_volume", full_print_volume);
                 const BuildVolume::BuildSharedVolume& shared_volume = m_build_volume.get_shared_volume();
                 std::array<float, 4>       xy_data       = shared_volume.data;
                 shader->set_uniform("print_volume.type", shared_volume.type);

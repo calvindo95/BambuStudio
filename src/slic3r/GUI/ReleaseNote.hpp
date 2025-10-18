@@ -1,6 +1,8 @@
 #ifndef slic3r_GUI_ReleaseNote_hpp_
 #define slic3r_GUI_ReleaseNote_hpp_
 
+#include <limits>
+
 #include <wx/wx.h>
 #include <wx/intl.h>
 #include <wx/collpane.h>
@@ -184,9 +186,11 @@ public:
         //LOAD_FILAMENT = 26*/
         IGNORE_RESUME = 27,
         PROBLEM_SOLVED_RESUME = 28,
-        STOP_BUZZER = 29,
+        TURN_OFF_FIRE_ALARM = 29,
 
         RETRY_PROBLEM_SOLVED = 34,
+        STOP_DRYING = 35,
+        REMOVE_CLOSE_BTN = 39, // special case, do not show close button
 
         ERROR_BUTTON_COUNT
     };
@@ -226,13 +230,15 @@ public:
 
 struct ConfirmBeforeSendInfo
 {
+public:
     enum InfoLevel {
         Normal = 0,
         Warning = 1
     };
     InfoLevel level;
     wxString text;
-    ConfirmBeforeSendInfo(wxString txt, InfoLevel lev = Normal) : text(txt), level(lev) {}
+    wxString wiki_url;
+    ConfirmBeforeSendInfo(const wxString& txt, const wxString& url = wxEmptyString, InfoLevel lev = Normal) : text(txt), wiki_url(url), level(lev){}
 };
 
 class ConfirmBeforeSendDialog : public DPIDialog
@@ -329,7 +335,7 @@ public:
     int    current_input_index {0};
     std::shared_ptr<SendJob> m_send_job{nullptr};
     std::shared_ptr<BBLStatusBarSend> m_status_bar;
-    boost::bimaps::bimap<std::string, std::string> m_models_map;
+    std::map<std::string, std::string> m_models_map;// display_name -> model_id
 
     void switch_input_panel(int index);
     void on_cancel();
@@ -357,6 +363,18 @@ public:
 
     //void on_ok(wxMouseEvent &evt);
     void on_dpi_changed(const wxRect &suggested_rect) override;
+};
+
+class ExpandCenterDialog : public DPIDialog
+{
+public:
+    ExpandCenterDialog(wxWindow* parent = nullptr);
+    ~ExpandCenterDialog() {};
+
+    //void on_ok(wxMouseEvent &evt);
+    void on_dpi_changed(const wxRect& suggested_rect) override;
+    void on_open_expand(const wxMouseEvent& evt);
+    void report_consent_unstall();
 };
 
 wxDECLARE_EVENT(EVT_CLOSE_IPADDRESS_DLG, wxCommandEvent);

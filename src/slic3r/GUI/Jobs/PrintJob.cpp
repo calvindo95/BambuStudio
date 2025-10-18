@@ -9,6 +9,11 @@
 #include "slic3r/GUI/MainFrame.hpp"
 #include "bambu_networking.hpp"
 
+#include "slic3r/GUI/DeviceCore/DevManager.h"
+#include "slic3r/GUI/DeviceCore/DevUtil.h"
+
+#include "slic3r/Utils/FileTransferUtils.hpp"
+
 namespace Slic3r {
 namespace GUI {
 
@@ -50,7 +55,6 @@ void PrintJob::prepare()
     if (&job_data) {
         std::string temp_file = Slic3r::resources_dir() + "/check_access_code.txt";
         auto check_access_code_path = temp_file.c_str();
-        BOOST_LOG_TRIVIAL(trace) << "sned_job: check_access_code_path = " << check_access_code_path;
         job_data._temp_path = fs::path(check_access_code_path);
     }
 
@@ -218,13 +222,26 @@ void PrintJob::process()
 
     // check access code and ip address
     if (this->connection_type == "lan" && m_print_type == "from_normal") {
-        params.dev_id = m_dev_id;
-        params.project_name = "verify_job";
-        params.filename = job_data._temp_path.string();
-        params.connection_type = this->connection_type;
+        bool emmc_ok = false;
+        bool ftp_ok = false;
+        if (could_emmc_print) {
+            std::string devIP = m_dev_ip;
+            std::string accessCode = m_access_code;
+            std::string url = "bambu:///local/" + devIP + "?port=6000&user=" + "bblp" + "&passwd=" + accessCode;
+            std::unique_ptr<FileTransferTunnel> tunnel = std::make_unique<FileTransferTunnel>(module(), url);
+            emmc_ok = tunnel->sync_start_connect();
+        }
+        {
+            params.dev_id = m_dev_id;
+            params.project_name = "verify_job";
+            params.filename = job_data._temp_path.string();
+            params.connection_type = this->connection_type;
 
-        result = m_agent->start_send_gcode_to_sdcard(params, nullptr, nullptr, nullptr);
-        if (result != 0) {
+            result = m_agent->start_send_gcode_to_sdcard(params, nullptr, nullptr, nullptr);
+
+            ftp_ok = result == 0;
+        }
+        if (!emmc_ok && !ftp_ok) {
             BOOST_LOG_TRIVIAL(error) << "access code is invalid";
             m_enter_ip_address_fun_fail();
             m_job_finished = true;
@@ -245,6 +262,7 @@ void PrintJob::process()
     params.task_vibration_cali  = this->task_vibration_cali;
     params.task_layer_inspect   = this->task_layer_inspect;
     params.task_record_timelapse= this->task_record_timelapse;
+    params.nozzle_mapping       = this->task_nozzle_mapping;
     params.ams_mapping          = this->task_ams_mapping;
     params.ams_mapping2         = this->task_ams_mapping2;
     params.ams_mapping_info     = this->task_ams_mapping_info;
@@ -256,6 +274,8 @@ void PrintJob::process()
     params.auto_bed_leveling    = this->auto_bed_leveling;
     params.auto_flow_cali       = this->auto_flow_cali;
     params.auto_offset_cali     = this->auto_offset_cali;
+    params.task_ext_change_assist = this->task_ext_change_assist;
+    params.try_emmc_print         = this->could_emmc_print;
 
     if (m_print_type == "from_sdcard_view") {
         params.dst_file = m_dst_path;
@@ -286,21 +306,20 @@ void PrintJob::process()
             catch (...) {}
         }
 
-        auto model_name = model_info->metadata_items.find(BBL_DESIGNER_MODEL_TITLE_TAG);
-        if (model_name != model_info->metadata_items.end()) {
-            try {
+         if (m_print_type != "from_sdcard_view") {
+            auto model_name = model_info->metadata_items.find(BBL_DESIGNER_MODEL_TITLE_TAG);
+            if (model_name != model_info->metadata_items.end()) {
+                try {
+                    std::string mall_model_name = model_name->second;
+                    std::replace(mall_model_name.begin(), mall_model_name.end(), ' ', '_');
+                    const char *unusable_symbols = "<>[]:/\\|?*\" ";
+                    for (const char *symbol = unusable_symbols; *symbol != '\0'; ++symbol) { std::replace(mall_model_name.begin(), mall_model_name.end(), *symbol, '_'); }
 
-                std::string mall_model_name = model_name->second;
-                std::replace(mall_model_name.begin(), mall_model_name.end(), ' ', '_');
-                const char* unusable_symbols = "<>[]:/\\|?*\" ";
-                for (const char* symbol = unusable_symbols; *symbol != '\0'; ++symbol) {
-                    std::replace(mall_model_name.begin(), mall_model_name.end(), *symbol, '_');
-                }
-
-                std::regex pattern("_+");
-                params.project_name = std::regex_replace(mall_model_name, pattern, "_");
+                    std::regex pattern("_+");
+                    params.project_name = std::regex_replace(mall_model_name, pattern, "_");
+                    params.project_name = truncate_string(params.project_name, 100);
+                } catch (...) {}
             }
-            catch (...) {}
         }
     }
 
@@ -485,7 +504,7 @@ void PrintJob::process()
             try {
                 job_info_j.parse(job_info);
                 if (job_info_j.contains("job_id")) {
-                    curr_job_id = JsonValParser::get_longlong_val(job_info_j["job_id"]);
+                    curr_job_id = DevJsonValParser::get_longlong_val(job_info_j["job_id"]);
                 }
                 BOOST_LOG_TRIVIAL(trace) << "print_job: curr_obj_id=" << curr_job_id;
 
@@ -593,7 +612,7 @@ void PrintJob::process()
             }
         }
     } else {
-        if (this->has_sdcard) {
+        if (this->has_sdcard || this->could_emmc_print) {
             this->update_status(curr_percent, _L("Sending print job over LAN"));
             result = m_agent->start_local_print(params, update_fn, cancel_fn);
         } else {

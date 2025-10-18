@@ -34,6 +34,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/Widgets/PopupWindow.hpp
     GUI/Widgets/Label.cpp
     GUI/Widgets/Label.hpp
+    GUI/Widgets/LinkLabel.cpp
+    GUI/Widgets/LinkLabel.hpp
     GUI/Widgets/Scrollbar.cpp
     GUI/Widgets/Scrollbar.hpp
     GUI/Widgets/ScrolledWindow.cpp
@@ -92,6 +94,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/Auxiliary.hpp
     GUI/DailyTips.cpp
     GUI/DailyTips.hpp
+    GUI/EncodedFilament.hpp
+    GUI/EncodedFilament.cpp
     GUI/Project.cpp
     GUI/Project.hpp
     GUI/BackgroundSlicingProcess.cpp
@@ -144,6 +148,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/Gizmos/GLGizmoSimplify.hpp
     GUI/Gizmos/GLGizmoMmuSegmentation.cpp
     GUI/Gizmos/GLGizmoMmuSegmentation.hpp
+    GUI/Gizmos/GLGizmoFuzzySkin.cpp
+    GUI/Gizmos/GLGizmoFuzzySkin.hpp
     GUI/Gizmos/GLGizmoFaceDetector.cpp
     GUI/Gizmos/GLGizmoFaceDetector.hpp
     GUI/Gizmos/GLGizmoMeasure.cpp
@@ -160,6 +166,10 @@ set(SLIC3R_GUI_SOURCES
     GUI/Gizmos/GLGizmoSVG.hpp
     GUI/Gizmos/GLGizmoMeshBoolean.cpp
     GUI/Gizmos/GLGizmoMeshBoolean.hpp
+    GUI/UIHelpers/MeshBooleanUI.cpp
+    GUI/UIHelpers/MeshBooleanUI.hpp
+    GUI/UIHelpers/TextEllipsis.cpp
+    GUI/UIHelpers/TextEllipsis.hpp
     GUI/GLSelectionRectangle.cpp
     GUI/GLSelectionRectangle.hpp
     GUI/Gizmos/GizmoObjectManipulation.cpp
@@ -200,7 +210,7 @@ set(SLIC3R_GUI_SOURCES
     GUI/GUI_Utils.hpp
     GUI/I18N.cpp
     GUI/I18N.hpp
-	GUI/IconManager.cpp
+    GUI/IconManager.cpp
     GUI/IconManager.hpp
     GUI/MainFrame.cpp
     GUI/MainFrame.hpp
@@ -266,6 +276,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/MonitorPage.hpp
     GUI/StatusPanel.cpp
     GUI/StatusPanel.hpp
+    GUI/ThermalPreconditioningDialog.cpp
+    GUI/ThermalPreconditioningDialog.hpp
     GUI/HMS.hpp
     GUI/HMS.cpp
     GUI/SliceInfoPanel.cpp
@@ -314,6 +326,10 @@ set(SLIC3R_GUI_SOURCES
     GUI/wxExtensions.hpp
     GUI/ObjColorDialog.cpp
     GUI/ObjColorDialog.hpp
+    GUI/FilamentPickerDialog.cpp
+    GUI/FilamentPickerDialog.hpp
+    GUI/FilamentBitmapUtils.cpp
+    GUI/FilamentBitmapUtils.hpp
     GUI/WipeTowerDialog.cpp
     GUI/WipeTowerDialog.hpp
     GUI/RemovableDriveManager.cpp
@@ -328,12 +344,18 @@ set(SLIC3R_GUI_SOURCES
     GUI/SyncAmsInfoDialog.hpp
     GUI/SurfaceDrag.cpp
     GUI/SurfaceDrag.hpp
+    GUI/TextLines.cpp
+    GUI/TextLines.hpp
     GUI/PlateSettingsDialog.cpp
     GUI/PlateSettingsDialog.hpp
     GUI/ImGuiWrapper.hpp
     GUI/ImGuiWrapper.cpp
+    GUI/ImageMessageDialog.hpp
+    GUI/ImageMessageDialog.cpp
     GUI/DeviceManager.hpp
     GUI/DeviceManager.cpp
+    GUI/DeviceErrorDialog.hpp
+    GUI/DeviceErrorDialog.cpp
     GUI/UserManager.hpp
     GUI/UserManager.cpp
     GUI/HttpServer.hpp
@@ -372,6 +394,10 @@ set(SLIC3R_GUI_SOURCES
     GUI/Jobs/UpgradeNetworkJob.cpp
     GUI/Jobs/ArrangeJob.hpp
     GUI/Jobs/ArrangeJob.cpp
+    GUI/Jobs/CreateFontNameImageJob.cpp
+    GUI/Jobs/CreateFontNameImageJob.hpp
+    GUI/Jobs/CreateFontStyleImagesJob.cpp
+    GUI/Jobs/CreateFontStyleImagesJob.hpp
     GUI/Jobs/OrientJob.hpp
     GUI/Jobs/OrientJob.cpp
     GUI/Jobs/RotoptimizeJob.hpp
@@ -426,6 +452,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/NotificationManager.hpp
     GUI/UnsavedChangesDialog.cpp
     GUI/UnsavedChangesDialog.hpp
+    GUI/UserPresetsDialog.cpp
+    GUI/UserPresetsDialog.hpp
     GUI/ExtraRenderers.cpp
     GUI/ExtraRenderers.hpp
     GUI/ProjectDirtyStateManager.hpp
@@ -444,6 +472,11 @@ set(SLIC3R_GUI_SOURCES
     GUI/BonjourDialog.hpp
     GUI/BindDialog.cpp
     GUI/BindDialog.hpp
+    GUI/PartSkipCommon.hpp
+    GUI/PartSkipDialog.cpp
+    GUI/PartSkipDialog.hpp
+    GUI/SkipPartCanvas.cpp
+    GUI/SkipPartCanvas.hpp
     GUI/ModelMall.hpp
     GUI/ModelMall.cpp
     GUI/SelectMachine.hpp
@@ -458,6 +491,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/AmsMappingPopup.cpp
     GUI/ReleaseNote.hpp
     GUI/ReleaseNote.cpp
+    GUI/HelioReleaseNote.hpp
+    GUI/HelioReleaseNote.cpp
     GUI/SingleChoiceDialog.hpp
     GUI/SingleChoiceDialog.cpp
     GUI/CaliHistoryDialog.hpp
@@ -482,6 +517,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/Calibration.cpp
     GUI/PrintOptionsDialog.hpp
     GUI/PrintOptionsDialog.cpp
+    GUI/SafetyOptionsDialog.hpp
+    GUI/SafetyOptionsDialog.cpp
     GUI/CreatePresetsDialog.hpp
     GUI/CreatePresetsDialog.cpp
     Utils/json_diff.hpp
@@ -506,12 +543,25 @@ set(SLIC3R_GUI_SOURCES
     GUI/SendMultiMachinePage.cpp
     GUI/TaskManager.cpp
     GUI/TaskManager.hpp
+    GUI/RenderEnums.hpp
+    GUI/GCodeRenderer/AdvancedRenderer.hpp
+    GUI/GCodeRenderer/AdvancedRenderer.cpp
+    GUI/GCodeRenderer/BaseRenderer.hpp
+    GUI/GCodeRenderer/BaseRenderer.cpp
+    GUI/GCodeRenderer/LegacyRenderer.hpp
+    GUI/GCodeRenderer/LegacyRenderer.cpp
+    Utils/WxFontUtils.cpp
+    Utils/WxFontUtils.hpp
+    Utils/EmbossStyleManager.cpp
+    Utils/EmbossStyleManager.hpp
     Utils/Http.cpp
     Utils/Http.hpp
     Utils/FixModelByWin10.cpp
     Utils/FixModelByWin10.hpp
     Utils/Bonjour.cpp
     Utils/Bonjour.hpp
+    Utils/BBLUtil.hpp
+    Utils/BBLUtil.cpp
     Utils/FileHelp.cpp
     Utils/FileHelp.hpp
     Utils/PresetUpdater.cpp
@@ -552,14 +602,21 @@ set(SLIC3R_GUI_SOURCES
     Utils/CalibUtils.cpp
     Utils/CalibUtils.hpp
     Utils/ProfileDescription.hpp
-	Utils/FontConfigHelp.cpp
-	Utils/FontConfigHelp.hpp
-	Utils/FontUtils.cpp
-	Utils/FontUtils.hpp
+    Utils/FontConfigHelp.cpp
+    Utils/FontConfigHelp.hpp
+    Utils/FontUtils.cpp
+    Utils/FontUtils.hpp
     Utils/WxFontUtils.hpp
     Utils/WxFontUtils.cpp
+    Utils/HelioDragon.cpp
+    Utils/HelioDragon.hpp
+    Utils/FileTransferUtils.cpp
+    Utils/FileTransferUtils.hpp
+    Utils/CertificateVerify.hpp
+    Utils/CertificateVerify.cpp
 )
 
+add_subdirectory(GUI/DeviceCore)
 add_subdirectory(GUI/DeviceTab)
 
 if (WIN32)

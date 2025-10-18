@@ -73,7 +73,8 @@ public:
         const Vec3d                                                  plate_origin,
         const std::vector<WipeTower::ToolChangeResult>              &priming,
         const std::vector<std::vector<WipeTower::ToolChangeResult>> &tool_changes,
-        const WipeTower::ToolChangeResult                           &final_purge) :
+        const WipeTower::ToolChangeResult                           &final_purge,
+        const std::vector<unsigned int>                             &slice_used_filaments) :
         m_left(/*float(print_config.wipe_tower_x.value)*/ 0.f),
         m_right(float(/*print_config.wipe_tower_x.value +*/ print_config.prime_tower_width.value)),
         m_wipe_tower_pos(float(print_config.wipe_tower_x.get_at(plate_idx)), float(print_config.wipe_tower_y.get_at(plate_idx))),
@@ -86,6 +87,7 @@ public:
         m_plate_origin(plate_origin),
         m_single_extruder_multi_material(print_config.single_extruder_multi_material),
         m_enable_timelapse_print(print_config.timelapse_type.value == TimelapseType::tlSmooth),
+        m_enable_wrapping_detection(print_config.enable_wrapping_detection && (print_config.wrapping_exclude_area.values.size() > 2) && (slice_used_filaments.size() <= 1)),
         m_is_first_print(true),
         m_print_config(&print_config)
     {
@@ -139,6 +141,7 @@ private:
     Vec3d                                                        m_plate_origin;
     bool                                                         m_single_extruder_multi_material;
     bool                                                         m_enable_timelapse_print;
+    bool                                                         m_enable_wrapping_detection;
     bool                                                         m_is_first_print;
     const PrintConfig *                                          m_print_config;
     float                                                        m_wipe_tower_depth;
@@ -179,7 +182,8 @@ public:
         m_last_obj_copy(nullptr, Point(std::numeric_limits<coord_t>::max(), std::numeric_limits<coord_t>::max())),
         // BBS
         m_toolchange_count(0),
-        m_nominal_z(0.)
+        m_nominal_z(0.),
+        m_smooth_coefficient(0.)
         {}
     ~GCode() = default;
 
@@ -218,7 +222,7 @@ public:
     std::string set_object_info(Print* print);
 
     // append full config to the given string
-    static void append_full_config(const Print& print, std::string& str);
+    static void append_full_config(const DynamicPrintConfig &cfg, std::string &str);
 
     // BBS: detect lift type in needs_retraction
     bool        needs_retraction(const Polyline &travel, ExtrusionRole role, LiftType &lift_type);
@@ -228,7 +232,7 @@ public:
     bool is_BBL_Printer();
 
     BoundingBoxf first_layer_projection(const Print& print) const;
-
+    void set_smooth_coff(float filamet_melting) { m_smooth_coefficient = filamet_melting * m_config.smooth_coefficient; }
     // Object and support extrusions of the same PrintObject at the same print_z.
     // public, so that it could be accessed by free helper functions from GCode.cpp
     struct LayerToPrint
@@ -314,6 +318,7 @@ private:
         size_t      gcode_store_pos = 0;
         //store each layer_time
         float       layer_time = 0;
+        bool   not_set_additional_fan { false };
         LayerResult() = default;
         LayerResult(const std::string& gcode_, const size_t layer_id_, const bool spiral_vase_enable_, const bool cooling_buffer_flush_, const size_t gcode_store_pos_ = static_cast<size_t>(-1)) :
             gcode(gcode_), layer_id(layer_id_), spiral_vase_enable(spiral_vase_enable_), cooling_buffer_flush(cooling_buffer_flush_), gcode_store_pos(gcode_store_pos_){}
@@ -325,7 +330,8 @@ private:
             spiral_vase_enable = other.spiral_vase_enable;
             cooling_buffer_flush = other.cooling_buffer_flush;
             gcode_store_pos = other.gcode_store_pos;
-            layer_time = other.layer_time;
+            layer_time     = other.layer_time;
+            not_set_additional_fan = other.not_set_additional_fan;
         }
 
         LayerResult& operator=(LayerResult&& other) noexcept {
@@ -335,7 +341,8 @@ private:
                 spiral_vase_enable = other.spiral_vase_enable;
                 cooling_buffer_flush = other.cooling_buffer_flush;
                 gcode_store_pos = other.gcode_store_pos;
-                layer_time = other.layer_time;
+                layer_time      = other.layer_time;
+                not_set_additional_fan = other.not_set_additional_fan;
             }
             return *this;
         }
@@ -380,6 +387,7 @@ private:
     void check_placeholder_parser_failed();
     size_t cur_extruder_index() const;
     size_t get_extruder_id(unsigned int filament_id) const;
+    void set_extrude_acceleration(bool is_first_layer);
 
     void            set_last_pos(const Point &pos) { m_last_pos = pos; m_last_pos_defined = true; }
     void            set_last_scarf_seam_flag(bool flag) { m_last_scarf_seam_flag = flag; }
@@ -395,7 +403,11 @@ private:
 
     //smooth speed function
     void            smooth_speed_discontinuity_area(ExtrusionPaths &paths);
-    ExtrusionPaths  merge_same_speed_paths(const ExtrusionPaths &paths);
+    std::vector<ExtrusionPaths>  merge_same_speed_paths(const ExtrusionPaths &paths);
+
+    // slow down by height
+    bool slowDownByHeight(double& maxSpeed, double& maxAcc, const ExtrusionPath& path);
+
     // Extruding multiple objects with soluble / non-soluble / combined supports
     // on a multi-material printer, trying to minimize tool switches.
     // Following structures sort extrusions by the extruder ID, by an order of objects and object islands.
@@ -465,6 +477,8 @@ private:
     std::string     extrude_support(const ExtrusionEntityCollection &support_fills);
 
     std::string travel_to(const Point &point, ExtrusionRole role, std::string comment, double z = DBL_MAX);
+
+    void reset_last_acceleration();
     // BBS
     LiftType to_lift_type(ZHopType z_hop_types);
 
@@ -547,6 +561,7 @@ private:
     bool m_enable_label_object;
     std::vector<size_t> m_label_objects_ids;
     std::string _encode_label_ids_to_base64(std::vector<size_t> ids);
+    float               m_smooth_coefficient{0.0f};
 
     // 1 << 0: A1 series cannot supprot traditional timelapse when printing by object (cannot turn on timelapse)
     // 1 << 1: A1 series cannot supprot traditional timelapse with spiral vase mode   (cannot turn on timelapse)
@@ -569,6 +584,7 @@ private:
     coordf_t m_nominal_z;
     bool m_need_change_layer_lift_z = false;
     int m_start_gcode_filament = -1;
+    std::string m_filament_instances_code;
 
     std::set<unsigned int>                  m_initial_layer_extruders;
     std::vector<std::vector<unsigned int>>  m_sorted_layer_filaments;
@@ -576,9 +592,10 @@ private:
     int get_bed_temperature(const int extruder_id, const bool is_first_layer, const BedType bed_type) const;
     int get_highest_bed_temperature(const bool is_first_layer,const Print &print) const;
 
+    double      calc_max_volumetric_speed(const double layer_height, const double line_width, const std::string co_str);
     std::string _extrude(const ExtrusionPath &path, std::string description = "", double speed = -1, bool set_holes_and_compensation_speed = false, bool is_first_slope = false);
-    ExtrusionPaths set_speed_transition(ExtrusionPaths &paths);
-    ExtrusionPaths split_and_mapping_speed(double &other_path_v, double &final_v, ExtrusionPath &this_path, double max_smooth_length, bool split_from_left = true);
+    ExtrusionPaths set_speed_transition(std::vector<ExtrusionPaths> &paths);
+    void split_and_mapping_speed(double other_path_v, double final_v, ExtrusionPaths &this_path, double max_smooth_length, ExtrusionPaths &interpolated_paths, bool split_from_left = true);
     double get_path_speed(const ExtrusionPath &path);
     double get_overhang_degree_corr_speed(float speed, double path_degree);
     double mapping_speed(double dist);

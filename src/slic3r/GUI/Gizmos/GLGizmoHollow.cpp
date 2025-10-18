@@ -17,12 +17,17 @@
 namespace Slic3r {
 namespace GUI {
 
-GLGizmoHollow::GLGizmoHollow(GLCanvas3D& parent, const std::string& icon_filename, unsigned int sprite_id)
-    : GLGizmoBase(parent, icon_filename, sprite_id)
+GLGizmoHollow::GLGizmoHollow(GLCanvas3D& parent, unsigned int sprite_id)
+    : GLGizmoBase(parent, sprite_id)
 {
     m_vbo_cylinder.init_from(its_make_cylinder(1., 1.));
 }
 
+
+std::string GLGizmoHollow::get_icon_filename(bool is_dark_mode) const
+{
+    return "hollow.svg";
+}
 
 bool GLGizmoHollow::on_init()
 {
@@ -391,10 +396,11 @@ void GLGizmoHollow::delete_selected_points()
     Plater::TakeSnapshot snapshot(wxGetApp().plater(), "Delete drainage hole");
     sla::DrainHoles& drain_holes = m_c->selection_info()->model_object()->sla_drain_holes;
 
-    for (unsigned int idx=0; idx<drain_holes.size(); ++idx) {
+    for (int idx=0; idx<drain_holes.size(); ++idx) {
         if (m_selected[idx]) {
             m_selected.erase(m_selected.begin()+idx);
-            drain_holes.erase(drain_holes.begin() + (idx--));
+            drain_holes.erase(drain_holes.begin() + idx);
+            idx--;
         }
     }
 
@@ -456,7 +462,16 @@ GLGizmoHollow::get_config_options(const std::vector<std::string>& keys) const
 
 void GLGizmoHollow::on_render_input_window(float x, float y, float bottom_limit)
 {
-    ModelObject* mo = m_c->selection_info()->model_object();
+    if (!m_c) {
+        return;
+    }
+
+    const auto& p_selection_info = m_c->selection_info();
+    if (!p_selection_info) {
+        return;
+    }
+
+    ModelObject* mo = p_selection_info->model_object();
     if (! mo)
         return;
 
@@ -517,7 +532,7 @@ RENDER_AGAIN:
 
     if (m_imgui->button(m_desc["preview"]))
         hollow_mesh();
-    
+
     bool config_changed = false;
 
     ImGui::Separator();

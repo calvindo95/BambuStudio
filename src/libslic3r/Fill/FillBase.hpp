@@ -39,6 +39,10 @@ struct LockRegionParam
 {
     LockRegionParam() {}
     std::map<float, ExPolygons> skin_density_params;
+    std::map<float, ExPolygons> skin_depths_params;
+    std::map<float, ExPolygons> locked_depths_params;
+
+    ExPolygons outlook;
     std::map<float, ExPolygons> skeleton_density_params;
     std::map<Flow, ExPolygons>  skin_flow_params;
     std::map<Flow, ExPolygons>  skeleton_flow_params;
@@ -90,8 +94,6 @@ struct FillParams
     bool            symmetric_infill_y_axis{false};
     coord_t         symmetric_y_axis{0};
     bool            locked_zag{false};
-    float           infill_lock_depth{0.0};
-    float           skin_infill_depth{0.0};
 };
 static_assert(IsTriviallyCopyable<FillParams>::value, "FillParams class is not POD (and it should be - see constructor).");
 
@@ -148,9 +150,22 @@ public:
     virtual Polylines fill_surface(const Surface *surface, const FillParams &params);
     virtual ThickPolylines fill_surface_arachne(const Surface* surface, const FillParams& params);
     virtual void set_lock_region_param(const LockRegionParam &lock_param){};
+    virtual void set_skin_and_skeleton_pattern(const InfillPattern &skin_pattern, const InfillPattern &skeleton_pattern){};
     // BBS: this method is used to fill the ExtrusionEntityCollection.
     // It call fill_surface by default
     virtual void fill_surface_extrusion(const Surface *surface, const FillParams &params, ExtrusionEntitiesPtr &out);
+    virtual void copy_fill_data(const Fill *f){
+        layer_id              = f->layer_id;
+        z                     = f->z;
+        spacing               = f->spacing;
+        overlap               = f->overlap;
+        angle                 = f->angle;
+        link_max_length       = f->link_max_length;
+        loop_clipping         = f->loop_clipping;
+        bounding_box          = f->bounding_box;
+        adapt_fill_octree     = f->adapt_fill_octree;
+        no_overlap_expolygons = f->no_overlap_expolygons;
+    };
 
 protected:
     Fill() :

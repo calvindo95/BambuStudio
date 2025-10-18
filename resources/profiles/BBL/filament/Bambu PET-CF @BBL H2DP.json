@@ -1,0 +1,60 @@
+{
+    "type": "filament",
+    "name": "Bambu PET-CF @BBL H2DP",
+    "inherits": "Bambu PET-CF @BBL X1C",
+    "from": "system",
+    "setting_id": "GFST01_05",
+    "instantiation": "true",
+    "chamber_temperatures": [
+        "50"
+    ],
+    "counter_coef_2": [
+        "0.0075"
+    ],
+    "counter_coef_3": [
+        "-0.052"
+    ],
+    "eng_plate_temp": [
+        "100"
+    ],
+    "eng_plate_temp_initial_layer": [
+        "100"
+    ],
+    "filament_printable": [
+        "1"
+    ],
+    "hole_coef_2": [
+        "-0.012"
+    ],
+    "hole_coef_3": [
+        "0.35043"
+    ],
+    "hole_limit_min": [
+        "0.07"
+    ],
+    "long_retractions_when_ec": [
+        "1",
+        "1"
+    ],
+    "reduce_fan_stop_start_freq": [
+        "1"
+    ],
+    "retraction_distances_when_ec": [
+        "10",
+        "10"
+    ],
+    "slow_down_min_speed": [
+        "10"
+    ],
+    "compatible_printers": [
+        "Bambu Lab H2D Pro 0.4 nozzle",
+        "Bambu Lab H2D Pro 0.6 nozzle",
+        "Bambu Lab H2D Pro 0.8 nozzle"
+    ],
+    "filament_start_gcode": [
+        "; filament start gcode\n"
+    ],
+    "filament_end_gcode": [
+        "; filament end gcode \n"
+    ]
+}

@@ -8,7 +8,6 @@
 #include <stack>
 #include <vector>
 
-#include "GLToolbar.hpp"
 #include "Event.hpp"
 #include "Selection.hpp"
 #include "Gizmos/GLGizmosManager.hpp"
@@ -16,7 +15,6 @@
 #include "GLSelectionRectangle.hpp"
 #include "MeshUtils.hpp"
 #include "libslic3r/GCode/GCodeProcessor.hpp"
-#include "GCodeViewer.hpp"
 #include "Camera.hpp"
 #include "IMToolbar.hpp"
 #include "slic3r/GUI/3DBed.hpp"
@@ -58,7 +56,13 @@ namespace CustomGCode { struct Item; }
 
 namespace GUI {
 
+namespace gcode {
+    class GCodeViewer;
+};
 class PartPlateList;
+class OpenGLManager;
+class GLToolbar;
+class GLToolbarItem;
 
 #if ENABLE_RETINA_GL
 class RetinaHelper;
@@ -407,7 +411,10 @@ class GLCanvas3D
         FilamentUnPrintableOnFirstLayer,
         MixUsePLAAndPETG,
         PrimeTowerOutside,
-        AsemblyInvalid // for asembly view only
+        NozzleFilamentIncompatible,
+        MixtureFilamentIncompatible,
+        AsemblyInvalid, // for asembly view only
+        FlushingVolumeZero
     };
 
     class RenderStats
@@ -564,6 +571,7 @@ public:
 
     int GetHoverId();
     void set_ignore_left_up() { m_mouse.ignore_left_up = true; }
+    GLVolumeCollection &get_paint_outline_volumes() { return m_paint_outline_volumes; }
 
 private:
     bool m_is_dark = false;
@@ -583,10 +591,8 @@ private:
     Mouse m_mouse;
     GLGizmosManager m_gizmos;
     //BBS: GUI refactor: GLToolbar
-    mutable GLToolbar m_main_toolbar;
-    mutable GLToolbar m_separator_toolbar;
+    mutable std::shared_ptr<GLToolbar> m_main_toolbar{ nullptr };
     mutable IMToolbar m_sel_plate_toolbar;
-    mutable GLToolbar m_assemble_view_toolbar;
     mutable IMReturnToolbar m_return_toolbar;
     mutable Vec2i              m_fit_camrea_button_pos = {128, 5};
     mutable float              m_sc{1};
@@ -604,8 +610,9 @@ private:
     bool m_extra_frame_requested;
     bool m_event_handlers_bound{ false };
 
+    GLVolumeCollection m_paint_outline_volumes;
     GLVolumeCollection m_volumes;
-    GCodeViewer m_gcode_viewer;
+    mutable std::shared_ptr<gcode::GCodeViewer> m_p_gcode_viewer{ nullptr };
 
     RenderTimer m_render_timer;
 
@@ -747,11 +754,11 @@ public:
     struct ToolbarHighlighter
     {
         void set_timer_owner(wxEvtHandler* owner, int timerid = wxID_ANY);
-        void init(GLToolbarItem* toolbar_item, GLCanvas3D* canvas);
+        void init(const std::shared_ptr<GLToolbarItem>& toolbar_item, GLCanvas3D* canvas);
         void blink();
         void invalidate();
         bool                    m_render_arrow{ false };
-        GLToolbarItem*          m_toolbar_item{ nullptr };
+        std::weak_ptr<GLToolbarItem> m_toolbar_item;
     private:
         GLCanvas3D*             m_canvas{ nullptr };
         int				        m_blink_counter{ 0 };
@@ -812,11 +819,10 @@ public:
     const float get_scale() const;
 
     //BBS
-    GCodeViewer& get_gcode_viewer() { return m_gcode_viewer; }
-    void init_gcode_viewer(ConfigOptionMode mode, Slic3r::PresetBundle* preset_bundle) { m_gcode_viewer.init(mode, preset_bundle); }
-    void reset_gcode_toolpaths() { m_gcode_viewer.reset(); }
-    const GCodeViewer::SequentialView& get_gcode_sequential_view() const { return m_gcode_viewer.get_sequential_view(); }
-    void update_gcode_sequential_view_current(unsigned int first, unsigned int last) { m_gcode_viewer.update_sequential_view_current(first, last); }
+    gcode::GCodeViewer& get_gcode_viewer() const;
+    void init_gcode_viewer(ConfigOptionMode mode, Slic3r::PresetBundle* preset_bundle);
+    void reset_gcode_toolpaths();
+    void update_gcode_sequential_view_current(unsigned int first, unsigned int last);
 
     void toggle_selected_volume_visibility(bool selected_visible);
     void toggle_sla_auxiliaries_visibility(bool visible, const ModelObject* mo = nullptr, int instance_idx = -1);
@@ -830,8 +836,8 @@ public:
     const Model* get_model() const { return m_model; }
     Model&       get_ref_model() const { return *m_model; }
 
-    const Selection& get_selection() const { return m_selection; }
-    Selection& get_selection() { return m_selection; }
+    const Selection& get_selection() const;
+    Selection& get_selection();
 
     const GLGizmosManager& get_gizmos_manager() const { return m_gizmos; }
     GLGizmosManager& get_gizmos_manager() { return m_gizmos; }
@@ -854,6 +860,9 @@ public:
 
     bool                                get_use_clipping_planes() const { return m_use_clipping_planes; }
     const std::array<ClippingPlane, 2> &get_clipping_planes() const { return m_clipping_planes; };
+    void                                set_use_color_clip_plane(bool use) { m_volumes.set_use_color_clip_plane(use); }
+    void                                set_color_clip_plane(const Vec3d &cp_normal, double offset) { m_volumes.set_color_clip_plane(cp_normal, offset); }
+    void                                set_color_clip_plane_colors(const std::array<ColorRGBA, 2> &colors) { m_volumes.set_color_clip_plane_colors(colors); }
 
     void set_color_by(const std::string& value);
 
@@ -886,10 +895,7 @@ public:
     void _update_select_plate_toolbar_stats_item(bool force_selected = false);
     void reset_select_plate_toolbar_selection();
     void enable_select_plate_toolbar(bool enable);
-    void clear_select_plate_toolbar_render_flag();
-    void enable_assemble_view_toolbar(bool enable);
     void enable_return_toolbar(bool enable);
-    void enable_separator_toolbar(bool enable);
     void enable_dynamic_background(bool enable);
     void enable_labels(bool enable) { m_labels.enable(enable); }
     void enable_slope(bool enable) { m_slope.enable(enable); }
@@ -907,13 +913,10 @@ public:
     //BBS: GUI refactor: GLToolbar&&gizmo
     int   get_main_toolbar_offset() const;
     float get_main_toolbar_left(int cnv_width,float inv_zoom) const;
-    int   get_main_toolbar_height() const { return m_main_toolbar.get_height(); }
-    int   get_main_toolbar_width() const { return m_main_toolbar.get_width(); }
-    float get_assemble_view_toolbar_width() const { return m_assemble_view_toolbar.get_width(); }
-    float get_assemble_view_toolbar_height() const { return m_assemble_view_toolbar.get_height(); }
+    int   get_main_toolbar_height() const;
+    int   get_main_toolbar_width() const;
+    float get_main_toolbar_scale() const;
     float get_assembly_paint_toolbar_width() const { return m_paint_toolbar_width; }
-    float get_separator_toolbar_width() const { return m_separator_toolbar.get_width(); }
-    float get_separator_toolbar_height() const { return m_separator_toolbar.get_height(); }
     bool  is_collapse_toolbar_on_left() const;
     float get_collapse_toolbar_width() const;
     float get_collapse_toolbar_height() const;
@@ -967,7 +970,6 @@ public:
     void select_curr_plate_all();
     void select_object_from_idx(std::vector<int>& object_idxs);
     void remove_curr_plate_all();
-    void update_plate_thumbnails();
 
     void select_all();
     void deselect_all();
@@ -976,16 +978,20 @@ public:
     void delete_selected();
     void ensure_on_bed(unsigned int object_idx, bool allow_negative_z);
 
-    bool is_gcode_legend_enabled() const { return m_gcode_viewer.is_legend_enabled(); }
-    GCodeViewer::EViewType get_gcode_view_type() const { return m_gcode_viewer.get_view_type(); }
-    const std::vector<double>& get_gcode_layers_zs() const;
+    int get_gcode_layers_count() const;
+    bool is_gcode_legend_enabled() const;
+    std::vector<double> get_gcode_layers_zs() const;
     std::vector<double> get_volumes_print_zs(bool active_only) const;
-    unsigned int get_gcode_options_visibility_flags() const { return m_gcode_viewer.get_options_visibility_flags(); }
+
     void set_gcode_options_visibility_from_flags(unsigned int flags);
-    unsigned int get_toolpath_role_visibility_flags() const { return m_gcode_viewer.get_toolpath_role_visibility_flags(); }
+    unsigned int get_gcode_options_visibility_flags() const;
+
+    unsigned int get_toolpath_role_visibility_flags() const;
+
     void set_volumes_z_range(const std::array<double, 2>& range);
-    std::vector<CustomGCode::Item>& get_custom_gcode_per_print_z() { return m_gcode_viewer.get_custom_gcode_per_print_z(); }
-    size_t get_gcode_extruders_count() { return m_gcode_viewer.get_extruders_count(); }
+    std::vector<CustomGCode::Item>& get_custom_gcode_per_print_z() const;
+
+    size_t get_gcode_extruders_count()const;
 
     std::vector<int> load_object(const ModelObject& model_object, int obj_idx, std::vector<int> instance_idxs, bool lod_enabled);
     std::vector<int> load_object(const Model& model, int obj_idx, bool lod_enabled);
@@ -995,14 +1001,12 @@ public:
     void reload_scene(bool refresh_immediately, bool force_full_scene_refresh = false);
     //BBS: always load shell at preview
     void load_shells(const Print& print, bool force_previewing = false);
-    void reset_shells() { m_gcode_viewer.reset_shell(); }
-    void set_shells_on_previewing(bool is_preview) { m_gcode_viewer.set_shells_on_preview(is_preview); }
+    void reset_shells();
+    void set_shells_on_previewing(bool is_preview);
 
     //BBS: add only gcode mode
     void load_gcode_preview(const GCodeProcessorResult& gcode_result, const std::vector<std::string>& str_tool_colors, bool only_gcode);
     void refresh_gcode_preview_render_paths();
-    void set_gcode_view_preview_type(GCodeViewer::EViewType type) { return m_gcode_viewer.set_view_type(type); }
-    GCodeViewer::EViewType get_gcode_view_preview_type() const { return m_gcode_viewer.get_view_type(); }
     void load_sla_preview();
     //void load_preview(const std::vector<std::string>& str_tool_colors, const std::vector<CustomGCode::Item>& color_print_values);
     void bind_event_handlers();
@@ -1021,6 +1025,7 @@ public:
     void on_paint(wxPaintEvent& evt);
     void on_kill_focus(wxFocusEvent &evt);
     void on_set_focus(wxFocusEvent& evt);
+    void on_back_slice_begin();
     void force_set_focus();
 
     Size get_canvas_size() const;
@@ -1101,9 +1106,9 @@ public:
 
     void schedule_extra_frame(int miliseconds);
 
-    int get_main_toolbar_item_id(const std::string& name) const { return m_main_toolbar.get_item_id(name); }
-    void force_main_toolbar_left_action(int item_id) { m_main_toolbar.force_left_action(item_id, *this); }
-    void force_main_toolbar_right_action(int item_id) { m_main_toolbar.force_right_action(item_id, *this); }
+    int get_main_toolbar_item_id(const std::string& name) const;
+    void force_main_toolbar_left_action(int item_id);
+    void force_main_toolbar_right_action(int item_id);
 
     bool has_toolpaths_to_export() const;
     void export_toolpaths_to_obj(const char* filename) const;
@@ -1188,9 +1193,7 @@ private:
     bool _init_main_toolbar();
     bool _init_select_plate_toolbar();
     bool _update_imgui_select_plate_toolbar();
-    bool _init_assemble_view_toolbar();
     bool _init_return_toolbar();
-    bool _init_separator_toolbar();
     // BBS
     //bool _init_view_toolbar();
     bool _init_collapse_toolbar();
@@ -1214,7 +1217,7 @@ private:
     void _render_platelist(bool bottom, bool only_current, bool only_body = false, int hover_id = -1, bool render_cali = false, bool show_grid = true) const;
     void _render_plates_for_picking() const;
     //BBS: add outline drawing logic
-    void _render_objects(GLVolumeCollection::ERenderType type, bool with_outline = true);
+    void _render_objects(GLVolumeCollection& cur_volumes, GLVolumeCollection::ERenderType type, bool with_outline = true,bool in_paint_gizmo = false);
     //BBS: GUI refactor: add canvas size as parameters
     void _render_gcode(int canvas_width, int canvas_height);
     //BBS: render a plane for assemble
@@ -1229,14 +1232,10 @@ private:
     void _render_style_editor();
     void _render_volumes_for_picking() const;
     void _render_current_gizmo() const;
-    void _render_gizmos_overlay();
     void _render_main_toolbar();
     void _render_imgui_select_plate_toolbar();
-    void _render_assemble_view_toolbar() const;
     void _render_return_toolbar();
     void _render_fit_camera_toolbar();
-    void _render_separator_toolbar_right() const;
-    void _render_separator_toolbar_left() const;
     void _render_collapse_toolbar() const;
     // BBS
     //void _render_view_toolbar() const;
@@ -1251,7 +1250,7 @@ private:
     void _render_selection_sidebar_hints() const;
     //BBS: GUI refactor: adjust main toolbar position
     bool _render_orient_menu(float left, float right, float bottom, float top);
-    bool _render_arrange_menu(float left, float right, float bottom, float top);
+    bool _render_arrange_menu(float left, float toolbar_height);
     void _render_3d_navigator();
     bool can_show_3d_navigator();
     void _update_volumes_hover_state();
@@ -1284,6 +1283,7 @@ private:
     // generates a warning notification containing the given message
     void _set_warning_notification(EWarning warning, bool state);
 
+    bool is_flushing_matrix_error();
     bool _is_any_volume_outside() const;
 
     // updates the selection from the content of m_hover_volume_idxs
@@ -1315,6 +1315,11 @@ private:
     void _init_unit_cube();
 
     void _append_to_frame_callback(const FrameCallback& cb);
+
+    void _render_toolbar();
+
+    const std::shared_ptr<GLToolbar>& get_main_toolbar() const;
+
     static bool is_volume_in_plate_boundingbox(const GLVolume &v, int plate_idx, const BoundingBoxf3 &plate_build_volume);
     static void _init_fullscreen_mesh();
 
@@ -1333,6 +1338,7 @@ const ModelVolume *get_model_volume(const GLVolume &v, const Model &model);
 ModelVolume *get_model_volume(const ObjectID &volume_id, const ModelObjectPtrs &objects);
 ModelVolume *get_model_volume(const GLVolume &v, const ModelObjectPtrs &objects);
 ModelVolume *get_model_volume(const GLVolume &v, const ModelObject &object);
+ModelVolume *get_selected_model_volume(const GLCanvas3D &canvas);
 
 GLVolume *get_first_hovered_gl_volume(const GLCanvas3D &canvas);
 GLVolume *get_selected_gl_volume(const GLCanvas3D &canvas);

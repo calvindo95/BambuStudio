@@ -8,6 +8,12 @@
     "additional_cooling_fan_speed": [
         "100"
     ],
+    "eng_plate_temp": [
+        "35"
+    ],
+    "eng_plate_temp_initial_layer": [
+        "35"
+    ],
     "fan_cooling_layer_time": [
         "40"
     ],
@@ -101,6 +107,10 @@
         "20",
         "20"
     ],
+    "filament_adaptive_volumetric_speed": [
+        "0",
+        "0"
+    ],
     "long_retractions_when_ec": [
         "1",
         "1"
@@ -122,6 +132,10 @@
     ],
     "slow_down_layer_time": [
         "10"
+    ],
+    "volumetric_speed_coefficients": [
+        "0 0 0 0 0 0",
+        "0 0 0 0 0 0"
     ],
     "compatible_printers": [
         "Bambu Lab H2D 0.4 nozzle",

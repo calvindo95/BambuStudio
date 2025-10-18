@@ -183,7 +183,7 @@ public:
 	bool   clip_with_bbox(const BoundingBox &bbox);
     // Extend the line from both sides by an offset.
     void   extend(double offset);
-
+    bool   overlap(const Line &line, double &overlap_length) const;
     static inline double distance_to_squared(const Point &point, const Point &a, const Point &b) { return line_alg::distance_to_squared(Line{a, b}, Vec<2, coord_t>{point}); }
     static double distance_to(const Point &point, const Point &a, const Point &b) { return sqrt(distance_to_squared(point, a, b)); }
 
@@ -250,12 +250,27 @@ public:
     Vec3d   vector() const { return this->b - this->a; }
     Vec3d   unit_vector() const { return (length() == 0.0) ? Vec3d::Zero() : vector().normalized(); }
     double  length() const { return vector().norm(); }
-
+    void    reverse() { std::swap(this->a, this->b); }
     Vec3d a;
     Vec3d b;
 
     static const constexpr int Dim = 3;
     using Scalar = Vec3d::Scalar;
+
+    static void get_point_projection_to_line(const Vec3d &pt, const Vec3d &line_start, const Vec3d &line_dir, Vec3d &intersection_pt, float &proj_length)
+    {
+        auto line_dir_ = line_dir.normalized();
+        auto BA         = pt - line_start;
+        proj_length    = BA.dot(line_dir_);
+        intersection_pt = line_start + proj_length * line_dir_;
+    }
+    float get_distance_of_point_to_line(const Vec3d &pt)
+    {
+        Vec3d intersection_pt;
+        float proj_length;
+        get_point_projection_to_line(pt, a, vector(), intersection_pt, proj_length);
+        return (intersection_pt - pt).norm();
+    }
 };
 
 class Line3float
@@ -276,6 +291,26 @@ public:
 };
 typedef std::vector<Line3float> Line3floats;
 BoundingBox get_extents(const Lines &lines);
+
+using Line_3D = Linef3;
+
+class Polygon_3D
+{
+public:
+    Polygon_3D(const std::vector<Vec3d> &points) : m_points(points) {}
+
+    std::vector<Line_3D> get_lines()
+    {
+        std::vector<Line_3D> lines;
+        lines.reserve(m_points.size());
+        if (m_points.size() > 2) {
+            for (int i = 0; i < m_points.size() - 1; ++i) { lines.push_back(Line_3D(m_points[i], m_points[i + 1])); }
+            lines.push_back(Line_3D(m_points.back(), m_points.front()));
+        }
+        return lines;
+    }
+    std::vector<Vec3d> m_points;
+};
 
 } // namespace Slic3r
 

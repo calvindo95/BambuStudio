@@ -125,6 +125,7 @@ public:
     bool     m_onlinefirst;    // Online Page First Load
     wxString m_online_type;    // recommend & browse
     wxString m_online_LastUrl; // PageLastError Url
+    std::string m_online_last_url; //last url
 
     void SendDesignStaffpick(bool on);
     void get_design_staffpick(int offset, int limit, std::function<void(std::string)> callback);
@@ -133,6 +134,7 @@ public:
     void OpenModelDetail(std::string id, NetworkAgent *agent);
     void UpdateMakerworldLoginStatus();
     void SetMakerworldPageLoginStatus(bool login, wxString ticket = "");
+    void get_wiki_search_result(std::string keyword);
 
     //Makerlab
     bool     m_MakerLabFirst;
@@ -145,6 +147,10 @@ public:
     bool     SaveBase64ToLocal(std::string Base64Buf, std::string FileName,std::string FileTail, wxString &download_path, wxString &download_file);
     void     SaveMakerlabStl(int SequenceID,std::string Base64Buf, std::string FileName);
     void     UpdateMakerlabStatus();
+
+    //wiki
+    bool m_WikiFirst;
+    wxString m_Wiki_LastUrl;
 
     //Common UI
     void SetWebviewShow(wxString name, bool show);
@@ -172,6 +178,7 @@ private:
     wxWebView * m_browserMW;
     wxWebView  *m_browserPH;               //PrintHistory
     wxWebView  *m_browserML;               //MakerLab
+    wxWebView  *m_browserWiki;
 
     //Basic Browser
     wxBoxSizer *bSizer_toolbar;

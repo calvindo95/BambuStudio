@@ -1,6 +1,6 @@
 //**********************************************************/
 /* File: uiAmsHumidityPopup.cpp
-*  Description: The popup with Ams Humidity
+*  Description: The popup with DevAms Humidity
 *
 * \n class uiAmsHumidityPopup
 //**********************************************************/
@@ -43,7 +43,7 @@ void uiAmsPercentHumidityDryPopup::Create()
     title->SetFont(Label::Head_18);
 
     title_sizer->AddStretchSpacer();
-    title_sizer->Add(title, 0, wxALIGN_CENTER_HORIZONTAL);
+    title_sizer->Add(title, 0);
     title_sizer->AddStretchSpacer();
 
     // create humidity image
@@ -146,12 +146,28 @@ void uiAmsPercentHumidityDryPopup::UpdateContents()
     // table grid
     const wxString& humidity_str = wxString::Format("%d%%", m_humidity_percent);
     m_humidity_label->SetLabel(humidity_str);
-    const wxString& temp_str = wxString::Format(_L("%.1f \u2103"), m_current_temperature);
+    const wxString& temp_str = wxString::Format(_L("%d \u2103"), (int)std::round(m_current_temperature));
     m_temperature_label->SetLabel(temp_str);
 
     if (m_left_dry_time > 0)
     {
-        const wxString& time_str = wxString::Format(_L("%d : %d"), m_left_dry_time / 60, m_left_dry_time % 60);
+        wxString display_hour_str;
+        int left_hours = m_left_dry_time / 60;
+        if (left_hours < 10) {
+            display_hour_str = wxString::Format("0%d", left_hours);
+        } else {
+            display_hour_str = wxString::Format("%d", left_hours);
+        }
+
+        wxString display_min_str;
+        int left_minutes = m_left_dry_time % 60;
+        if (left_minutes < 10) {
+            display_min_str = wxString::Format("0%d", left_minutes);
+        } else {
+            display_min_str = wxString::Format("%d", left_minutes);
+        }
+
+        const wxString& time_str = wxString::Format("%s : %s", display_hour_str, display_min_str);
         left_dry_time_label->SetLabel(time_str);
     }
     else

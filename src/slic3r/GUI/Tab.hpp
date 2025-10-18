@@ -585,7 +585,6 @@ class TabPrinter : public Tab
 private:
 	bool		m_has_single_extruder_MM_page = false;
 	bool		m_use_silent_mode = false;
-    bool        m_supports_travel_acceleration = false;
 	void		append_option_line(ConfigOptionsGroupShp optgroup, const std::string opt_key);
 	bool		m_rebuild_kinematics_page = false;
 
@@ -603,6 +602,7 @@ public:
 	size_t		m_initial_extruders_count;
 	size_t		m_sys_extruders_count;
 	size_t		m_cache_extruder_count = 0;
+	std::vector<std::string> m_extruder_variant_list;
 	std::string m_base_preset_name;
 
     PrinterTechnology               m_printer_technology = ptFFF;

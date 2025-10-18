@@ -31,7 +31,7 @@ static ModelVolume *get_model_volume(const Selection &selection, Model &model)
     return obj->volumes[cid.volume_id];
 }
 
-GLGizmoBrimEars::GLGizmoBrimEars(GLCanvas3D &parent, const std::string &icon_filename, unsigned int sprite_id) : GLGizmoBase(parent, icon_filename, sprite_id) {}
+GLGizmoBrimEars::GLGizmoBrimEars(GLCanvas3D &parent, unsigned int sprite_id) : GLGizmoBase(parent, sprite_id) {}
 
 bool GLGizmoBrimEars::on_init()
 {
@@ -100,7 +100,7 @@ bool GLGizmoBrimEars::is_use_point(const BrimPoint &point) const
         const GLVolume* volume = selection.get_volume(*selection.get_volume_idxs().begin());
         trsf = volume->get_instance_transformation().get_matrix();
     }
-    
+
     auto world_point = trsf * point.pos.cast<double>();
     if (world_point[2] > 0) return false;
     return true;
@@ -146,7 +146,7 @@ void GLGizmoBrimEars::render_points(const Selection &selection, bool picking) co
         }else {
             volume_matrix = vol->get_instance_transformation().get_matrix();
         }
-        
+
         // keep show brim ear
         // if (is_mesh_point_clipped(brim_point.pos.cast<double>()))
         //     continue;
@@ -284,6 +284,11 @@ void GLGizmoBrimEars::data_changed(bool is_serializing)
         register_single_mesh_pick();
     }
     set_brim_data();
+}
+
+std::string GLGizmoBrimEars::get_icon_filename(bool is_dark_mode) const
+{
+    return is_dark_mode ? "toolbar_brimears_dark.svg" : "toolbar_brimears.svg";
 }
 
 void GLGizmoBrimEars::set_brim_data()
@@ -478,8 +483,10 @@ void GLGizmoBrimEars::delete_selected_points()
 {
     Plater::TakeSnapshot snapshot(wxGetApp().plater(), "Delete brim ear");
 
-    for (unsigned int idx = 0; idx < m_editing_cache.size(); ++idx) {
-        if (m_editing_cache[idx].selected) { m_editing_cache.erase(m_editing_cache.begin() + (idx--)); }
+    for (int idx = m_editing_cache.size() - 1; idx >= 0; idx--) {
+        if (m_editing_cache[idx].selected ) {
+            m_editing_cache.erase(m_editing_cache.begin() + idx);
+        }
     }
 
     select_point(NoPoints);
@@ -531,7 +538,15 @@ void GLGizmoBrimEars::on_render_input_window(float x, float y, float bottom_limi
     static float last_y = 0.0f;
     static float last_h = 0.0f;
 
-    ModelObject *mo = m_c->selection_info()->model_object();
+    if (!m_c) {
+        return;
+    }
+    const auto& p_selection_info = m_c->selection_info();
+    if (!p_selection_info) {
+        return;
+    }
+
+    ModelObject *mo = p_selection_info->model_object();
 
     if (!mo) return;
 
@@ -640,7 +655,7 @@ void GLGizmoBrimEars::on_render_input_window(float x, float y, float bottom_limi
 
     // ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6.0f, 10.0f));
 
-    float f_scale = m_parent.get_gizmos_manager().get_layout_scale();
+    float f_scale = m_parent.get_main_toolbar_scale();
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 4.0f * f_scale));
     if (m_imgui->button(m_desc["auto_generate"])) { auto_generate(); }
 

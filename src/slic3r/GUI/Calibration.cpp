@@ -11,6 +11,8 @@
 #include "Widgets/RoundedRectangle.hpp"
 #include "Widgets/StaticBox.hpp"
 
+#include "DeviceCore/DevConfig.h"
+
 static wxColour FG_COLOR = wxColour(0x32, 0x3A, 0x3D);
 static wxColour BG_COLOR = wxColour(0xF8, 0xF8, 0xF8);
 
@@ -55,7 +57,8 @@ CalibrationDialog::CalibrationDialog(Plater *plater)
     select_vibration    = create_check_option(_L("Vibration compensation"), cali_left_panel, _L("Vibration compensation"), "vibration");
     select_motor_noise  = create_check_option(_L("Motor noise cancellation"), cali_left_panel, _L("Motor noise cancellation"), "motor_noise");
     select_nozzle_cali  = create_check_option(_L("Nozzle offset calibration"), cali_left_panel, _L("Nozzle offset calibration"), "nozzle_cali");
-    select_heatbed_cali = create_check_option(_L("High-temperature Heatbed Calibration"), cali_left_panel, _L("High-temperature Heatbed Calibration"), "bed_cali");
+    select_heatbed_cali  = create_check_option(_L("High-temperature Heatbed Calibration"), cali_left_panel, _L("High-temperature Heatbed Calibration"), "bed_cali");
+    select_clumppos_cali = create_check_option(_L("Nozzle clumping detection Calibration"), cali_left_panel, _L("Nozzle clumping detection Calibration"), "clump_pos_cali");
 
     // STUDIO-10091 the default not checked option
     if(m_checkbox_list.count("bed_cali") != 0)
@@ -70,6 +73,7 @@ CalibrationDialog::CalibrationDialog(Plater *plater)
     cali_left_sizer->Add(select_motor_noise, 0, wxLEFT, FromDIP(15));
     cali_left_sizer->Add(select_nozzle_cali, 0, wxLEFT, FromDIP(15));
     cali_left_sizer->Add(select_heatbed_cali, 0, wxLEFT, FromDIP(15));
+    cali_left_sizer->Add(select_clumppos_cali, 0, wxLEFT, FromDIP(15));
     cali_left_sizer->Add(0, FromDIP(30), 0, wxEXPAND, 0);
 
     auto cali_left_text_top = new wxStaticText(cali_left_panel, wxID_ANY, _L("Calibration program"), wxDefaultPosition, wxDefaultSize, 0);
@@ -118,7 +122,7 @@ CalibrationDialog::CalibrationDialog(Plater *plater)
     wxBoxSizer *cali_right_sizer_h = new wxBoxSizer(wxHORIZONTAL);
     wxBoxSizer *cali_right_sizer_v = new wxBoxSizer(wxVERTICAL);
 
-    auto cali_right_panel = new StaticBox(body_panel, wxID_ANY, wxDefaultPosition, wxSize(FromDIP(182), FromDIP(160)));
+    auto cali_right_panel = new StaticBox(body_panel, wxID_ANY, wxDefaultPosition, wxSize(FromDIP(182), FromDIP(200)));
     cali_right_panel->SetBackgroundColor(BG_COLOR);
     cali_right_panel->SetBorderColor(BG_COLOR);
 
@@ -216,7 +220,8 @@ wxWindow* CalibrationDialog::create_check_option(wxString title, wxWindow* paren
 void CalibrationDialog::update_cali(MachineObject *obj)
 {
     if (!obj) return;
-    if (obj->is_support_ai_monitoring && obj->is_support_lidar_calibration) {
+    if (obj->GetConfig()->SupportAIMonitor() && obj->GetConfig()->SupportCalibrationLidar())
+    {
         select_xcam_cali->Show();
     } else {
         select_xcam_cali->Hide();
@@ -237,33 +242,39 @@ void CalibrationDialog::update_cali(MachineObject *obj)
         m_checkbox_list["motor_noise"]->SetValue(false);
     }
 
-    if (obj->is_support_nozzle_offset_cali) {
+    if (obj->GetConfig()->SupportCalibrationNozzleOffset()) {
         select_nozzle_cali->Show();
     } else {
         select_nozzle_cali->Hide();
         m_checkbox_list["nozzle_cali"]->SetValue(false);
     }
 
-    if (obj->is_support_high_tempbed_cali)
-    {
+    if (obj->GetConfig()->SupportCalibrationHighTempBed()) {
         select_heatbed_cali->Show();
-    }
-    else
-    {
+    } else {
         select_heatbed_cali->Hide();
         m_checkbox_list["bed_cali"]->SetValue(false);
+    }
+
+    if (obj->GetConfig()->SupportCaliClumpPos()) {
+        select_clumppos_cali->Show();
+    } else {
+        select_clumppos_cali->Hide();
+        m_checkbox_list["clump_pos_cali"]->SetValue(false);
     }
 
     if (obj->is_calibration_running() || obj->is_calibration_done()) {
         if (obj->is_calibration_done()) {
             m_calibration_btn->Enable();
             m_calibration_btn->SetLabel(_L("Completed"));
+
         } else {
             // RUNNING && IDLE
             m_calibration_btn->Disable();
             m_calibration_btn->SetLabel(_L("Calibrating"));
+
         }
-        auto size = wxSize(CALI_FLOW_CONTENT_WIDTH, obj->stage_list_info.size() * FromDIP(44));
+        auto size = wxSize(CALI_FLOW_CONTENT_WIDTH, obj->stage_list_info.size() * FromDIP(35));
         if (m_calibration_flow->GetSize().y != size.y) {
             m_calibration_flow->SetSize(size);
             m_calibration_flow->SetMinSize(size);
@@ -271,13 +282,16 @@ void CalibrationDialog::update_cali(MachineObject *obj)
             m_calibration_flow->Refresh();
 
             Layout();
+
         }
         if (is_stage_list_info_changed(obj)) {
             // change items if stage_list_info changed
             m_calibration_flow->DeleteAllItems();
             for (int i = 0; i < obj->stage_list_info.size(); i++) {
-                m_calibration_flow->AppendItem(get_stage_string(obj->stage_list_info[i]));
+                m_calibration_flow->AppendItem(Slic3r::get_stage_string(obj->stage_list_info[i]));
             }
+
+            last_stage_list_info = obj->stage_list_info;
         }
         int index = obj->get_curr_stage_idx();
         m_calibration_flow->SelectItem(index);
@@ -332,7 +346,8 @@ void CalibrationDialog::on_start_calibration(wxMouseEvent &event)
                 m_checkbox_list["xcam_cali"]->GetValue(),
                 m_checkbox_list["motor_noise"]->GetValue(),
                 m_checkbox_list["nozzle_cali"]->GetValue(),
-                m_checkbox_list["bed_cali"]->GetValue()
+                m_checkbox_list["bed_cali"]->GetValue(),
+                m_checkbox_list["clump_pos_cali"]->GetValue()
                 );
         }
     }

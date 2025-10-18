@@ -60,15 +60,17 @@ public:
                 if (hr == S_OK) {
                     settings2->put_UserAgent(userAgent.wc_str());
                     settings2->Release();
+                    ICoreWebView2Settings4 *settings4;
+                    hr = settings->QueryInterface(&settings4);
+                    if (hr == S_OK) {
+                        settings4->put_IsGeneralAutofillEnabled(Slic3r::GUI::wxGetApp().app_config->get_bool("webview_auto_fill"));
+                        settings4->Release();
+                    }
                     return true;
                 }
             }
             settings->Release();
             return false;
-        } else {
-            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": create web view failed.";
-            wxDynamicLibrary loaderDll;
-            loaderDll.Load("WebView2Loader.dll", wxDL_DEFAULT);
         }
         pendingUserAgent = userAgent;
         return true;
@@ -203,11 +205,12 @@ wxString WebView::BuildEdgeUserDataPath()
         static wxFile lockFile;
         if (lockFile.Exists(bambu_lock_file)) { DeleteFileW(bambu_lock_file.wc_str()); }/*try delete previous file so that we could lock it by wxFile::write_excl*/
 
+        wxLogNull suppress_log;
         if (lockFile.Open(bambu_lock_file, wxFile::write_excl)) {
             data_dir = bambu_dir;
             break;
         }
-        
+
         if (!lockFile.Exists(bambu_lock_file)) { break; } /*maybe don't have access rights to create file, break*/
     }
 
@@ -236,7 +239,7 @@ wxWebView* WebView::CreateWebView(wxWindow * parent, wxString const & url)
     url2.Replace("\\", "/");
 #endif
     if (!url2.empty()) { url2 = wxURI(url2).BuildURI(); }
-    BOOST_LOG_TRIVIAL(trace) << __FUNCTION__ << ": " << url2.ToUTF8();
+    //BOOST_LOG_TRIVIAL(trace) << __FUNCTION__ << ": " << url2.ToUTF8();
 
 #ifdef __WIN32__
     wxWebView* webView = new WebViewEdge;
@@ -314,7 +317,7 @@ void WebView::LoadUrl(wxWebView * webView, wxString const &url)
     url2.Replace("\\", "/");
 #endif
     if (!url2.empty()) { url2 = wxURI(url2).BuildURI(); }
-    BOOST_LOG_TRIVIAL(trace) << __FUNCTION__ << url2.ToUTF8();
+    //BOOST_LOG_TRIVIAL(trace) << __FUNCTION__ << url2.ToUTF8();
     webView->LoadURL(url2);
 }
 

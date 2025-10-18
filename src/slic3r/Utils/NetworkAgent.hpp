@@ -36,8 +36,6 @@ typedef int (*func_stop_subscribe)(void *agent, std::string module);
 typedef int (*func_add_subscribe)(void *agent, std::vector<std::string> dev_list);
 typedef int (*func_del_subscribe)(void *agent, std::vector<std::string> dev_list);
 typedef void (*func_enable_multi_machine)(void *agent, bool enable);
-typedef int (*func_start_device_subscribe)(void* agent);
-typedef int (*func_stop_device_subscribe)(void* agent);
 typedef int (*func_send_message)(void *agent, std::string dev_id, std::string json_str, int qos, int flag);
 typedef int (*func_connect_printer)(void *agent, std::string dev_id, std::string dev_ip, std::string username, std::string password, bool use_ssl);
 typedef int (*func_disconnect_printer)(void *agent);
@@ -57,6 +55,7 @@ typedef std::string (*func_build_logout_cmd)(void *agent);
 typedef std::string (*func_build_login_info)(void *agent);
 typedef int (*func_ping_bind)(void *agent, std::string ping_code);
 typedef int (*func_bind_detect)(void *agent, std::string dev_ip, std::string sec_link, detectResult& detect);
+typedef int (*func_report_consent)(void *agent, std::string expand);
 typedef int (*func_set_server_callback)(void *agent, OnServerErrFn fn);
 typedef int (*func_bind)(void *agent, std::string dev_ip, std::string dev_id, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn);
 typedef int (*func_unbind)(void *agent, std::string dev_id);
@@ -96,6 +95,7 @@ typedef int (*func_get_subtask)(void *agent, BBLModelTask* task, OnGetSubTaskFn 
 typedef int (*func_get_model_mall_home_url)(void *agent, std::string* url);
 typedef int (*func_get_model_mall_detail_url)(void *agent, std::string* url, std::string id);
 typedef int (*func_get_my_profile)(void *agent, std::string token, unsigned int *http_code, std::string *http_body);
+typedef int (*func_get_my_token)(void *agent, std::string ticket, unsigned int *http_code, std::string *http_body);
 typedef int (*func_track_enable)(void *agent, bool enable);
 typedef int (*func_track_remove_files)(void *agent);
 typedef int (*func_track_event)(void *agent, std::string evt_key, std::string content);
@@ -112,14 +112,13 @@ typedef int (*func_get_model_mall_rating_result)(void *agent, int job_id, std::s
 typedef int (*func_get_mw_user_preference)(void *agent, std::function<void(std::string)> callback);
 typedef int (*func_get_mw_user_4ulist)(void *agent, int seed, int limit, std::function<void(std::string)> callback);
 
-
 //the NetworkAgent class
 class NetworkAgent
 {
 
 public:
     static std::string get_libpath_in_current_directory(std::string library_name);
-    static int initialize_network_module(bool using_backup = false);
+    static int initialize_network_module(bool using_backup = false, bool validate_cert = true);
     static int unload_network_module();
 #if defined(_MSC_VER) || defined(_WIN32)
     static HMODULE get_bambu_source_entry();
@@ -156,8 +155,6 @@ public:
     int add_subscribe(std::vector<std::string> dev_list);
     int del_subscribe(std::vector<std::string> dev_list);
     void enable_multi_machine(bool enable);
-    int start_device_subscribe();
-    int stop_device_subscribe();
     int send_message(std::string dev_id, std::string json_str, int qos, int flag);
     int connect_printer(std::string dev_id, std::string dev_ip, std::string username, std::string password, bool use_ssl);
     int disconnect_printer();
@@ -177,6 +174,7 @@ public:
     std::string build_login_info();
     int ping_bind(std::string ping_code);
     int bind_detect(std::string dev_ip, std::string sec_link, detectResult& detect);
+    int report_consent(std::string expand);
     int set_server_callback(OnServerErrFn fn);
     int bind(std::string dev_ip, std::string dev_id, std::string sec_link, std::string timezone, bool improved, OnUpdateStatusFn update_fn);
     int unbind(std::string dev_id);
@@ -216,6 +214,7 @@ public:
     int get_model_mall_home_url(std::string* url);
     int get_model_mall_detail_url(std::string* url, std::string id);
     int get_my_profile(std::string token, unsigned int* http_code, std::string* http_body);
+    int get_my_token(std::string ticket, unsigned int* http_code, std::string* http_body);
     int track_enable(bool enable);
     int track_remove_files();
     int track_event(std::string evt_key, std::string content);
@@ -265,8 +264,6 @@ private:
     static func_add_subscribe                  add_subscribe_ptr;
     static func_del_subscribe                  del_subscribe_ptr;
     static func_enable_multi_machine           enable_multi_machine_ptr;
-    static func_start_device_subscribe         start_device_subscribe_ptr;
-    static func_stop_device_subscribe          stop_device_subscribe_ptr;
     static func_send_message                   send_message_ptr;
     static func_connect_printer                connect_printer_ptr;
     static func_disconnect_printer             disconnect_printer_ptr;
@@ -286,6 +283,7 @@ private:
     static func_build_login_info               build_login_info_ptr;
     static func_ping_bind                      ping_bind_ptr;
     static func_bind_detect                    bind_detect_ptr;
+    static func_report_consent                 report_consent_ptr;
     static func_set_server_callback            set_server_callback_ptr;
     static func_bind                           bind_ptr;
     static func_unbind                         unbind_ptr;
@@ -325,6 +323,7 @@ private:
     static func_get_model_mall_home_url        get_model_mall_home_url_ptr;
     static func_get_model_mall_detail_url      get_model_mall_detail_url_ptr;
     static func_get_my_profile                 get_my_profile_ptr;
+    static func_get_my_token                   get_my_token_ptr;
     static func_track_enable                   track_enable_ptr;
     static func_track_remove_files             track_remove_files_ptr;
     static func_track_event                    track_event_ptr;

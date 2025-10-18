@@ -337,6 +337,10 @@ void PrintObject::make_perimeters()
         }
         m_typed_slices = false;
     }
+    if (this->config().enable_circle_compensation) { // we need the circle_compensation information
+        for (Layer *layer : m_layers) layer->apply_auto_circle_compensation();
+        m_typed_slices = true;
+    }
 
     // compare each layer to the one below, and mark those slices needing
     // one additional inner perimeter, like the top of domed objects-
@@ -508,7 +512,8 @@ void PrintObject::prepare_infill()
     // Then the classifcation of $layerm->slices is transfered onto
     // the $layerm->fill_surfaces by clipping $layerm->fill_surfaces
     // by the cummulative area of the previous $layerm->fill_surfaces.
-    this->detect_surfaces_type();
+    std::vector<std::vector<SurfaceCollection>> slice_surfaces_cpy;
+    this->detect_surfaces_type(slice_surfaces_cpy);
     m_print->throw_if_canceled();
 
     // Also tiny stInternal surfaces are turned to stInternalSolid.
@@ -569,7 +574,7 @@ void PrintObject::prepare_infill()
 
     if (m_config.interlocking_beam.value)
         discover_shell_for_perimeters();
-
+    reset_slice_surfaces(slice_surfaces_cpy);
     // Only active if config->infill_only_where_needed. This step trims the sparse infill,
     // so it acts as an internal support. It maintains all other infill types intact.
     // Here the internal surfaces and perimeters have to be supported by the sparse infill.
@@ -633,7 +638,7 @@ void PrintObject::infill()
                for (size_t layer_idx = range.begin(); layer_idx < range.end(); ++ layer_idx) {
                    m_print->throw_if_canceled();
                    m_layers[layer_idx]->make_fills(adaptive_fill_octree.get(), support_fill_octree.get(), this->m_lightning_generator.get());
-               }
+                }
            }
         );
         m_print->throw_if_canceled();
@@ -676,6 +681,8 @@ void PrintObject::clear_overhangs_for_lift()
 
 static const float g_min_overhang_percent_for_lift = 0.3f;
 
+#define REGISTER_SUPPORTS_FOR_LIFT
+
 void PrintObject::detect_overhangs_for_lift()
 {
     if (this->set_started(posDetectOverhangsForLift)) {
@@ -688,18 +695,32 @@ void PrintObject::detect_overhangs_for_lift()
         this->clear_overhangs_for_lift();
 
         tbb::spin_mutex layer_storage_mutex;
-        tbb::parallel_for(tbb::blocked_range<size_t>(num_raft_layers + 1, num_layers),
-            [this, min_overlap](const tbb::blocked_range<size_t>& range)
-            {
-                for (size_t layer_id = range.begin(); layer_id < range.end(); ++layer_id) {
-                    Layer& layer = *m_layers[layer_id];
-                    Layer& lower_layer = *layer.lower_layer;
+        tbb::parallel_for(tbb::blocked_range<size_t>(num_raft_layers + 1, num_layers), [this, min_overlap](const tbb::blocked_range<size_t> &range) {
+            for (size_t layer_id = range.begin(); layer_id < range.end(); ++layer_id) {
+                Layer &layer       = *m_layers[layer_id];
+                Layer &lower_layer = *layer.lower_layer;
 
-                    ExPolygons overhangs = diff_ex(layer.lslices, offset_ex(lower_layer.lslices, scale_(min_overlap)));
-                    layer.loverhangs = std::move(offset2_ex(overhangs, -0.1f * scale_(m_config.line_width), 0.1f * scale_(m_config.line_width)));
-                    layer.loverhangs_bbox = get_extents(layer.loverhangs);
+                ExPolygons overhangs = diff_ex(layer.lslices, offset_ex(lower_layer.lslices, scale_(min_overlap)));
+                layer.loverhangs     = std::move(offset2_ex(overhangs, -0.1f * scale_(m_config.line_width), 0.1f * scale_(m_config.line_width)));
+
+#ifdef REGISTER_SUPPORTS_FOR_LIFT
+                // register all supports to avoidance region for lift
+                if (layer_id < m_support_layers.size()) {
+                    auto &support_layer = m_support_layers[layer_id];
+                    if (support_layer) {
+                        if (!support_layer->support_islands.empty()) {
+                            append(layer.loverhangs,
+                                   std::move(offset2_ex(support_layer->support_islands, -0.1f * scale_(m_config.line_width), 0.1f * scale_(m_config.line_width))));
+                        } else {
+                            ExPolygons support_infill_polygons = union_ex(support_layer->support_fills.polygons_covered_by_spacing(double(coord_t(SCALED_EPSILON))));
+                            append(layer.loverhangs, std::move(offset2_ex(support_infill_polygons, -0.1f * scale_(m_config.line_width), 0.1f * scale_(m_config.line_width))));
+                        }
+                    }
                 }
-            });
+#endif
+                layer.loverhangs_bbox = get_extents(layer.loverhangs);
+            }
+        });
         this->set_done(posDetectOverhangsForLift);
     }
 }
@@ -709,26 +730,25 @@ void PrintObject::generate_support_material()
     if (this->set_started(posSupportMaterial)) {
         this->clear_support_layers();
 
-        if(!has_support() && !m_print->get_no_check_flag()) {
+        if (!has_support() && !m_print->get_no_check_flag()) {
             // BBS: pop a warning if objects have significant amount of overhangs but support material is not enabled
             // Note: we also need to pop warning if support is disabled and only raft is enabled
             m_print->set_status(50, L("Checking support necessity"));
-            typedef std::chrono::high_resolution_clock clock_;
-            typedef std::chrono::duration<double, std::ratio<1> > second_;
-            std::chrono::time_point<clock_> t0{ clock_::now() };
+            typedef std::chrono::high_resolution_clock           clock_;
+            typedef std::chrono::duration<double, std::ratio<1>> second_;
+            std::chrono::time_point<clock_>                      t0{clock_::now()};
 
             SupportNecessaryType sntype = this->is_support_necessary();
 
-            double duration{ std::chrono::duration_cast<second_>(clock_::now() - t0).count() };
+            double duration{std::chrono::duration_cast<second_>(clock_::now() - t0).count()};
             BOOST_LOG_TRIVIAL(info) << std::fixed << std::setprecision(0) << "is_support_necessary takes " << duration << " secs.";
 
             if (sntype != NoNeedSupp) {
-                std::map<SupportNecessaryType, std::string> reasons = {
-                    {SharpTail,L("floating regions")},
-                    {Cantilever,L("floating cantilever")},
-                    {LargeOverhang,L("large overhangs")} };
-                std::string warning_message = Slic3r::format(L("It seems object %s has %s. Please re-orient the object or enable support generation."),
-                    this->model_object()->name, reasons[sntype]);
+                std::map<SupportNecessaryType, std::string> reasons = {{SharpTail, L("floating regions")},
+                                                                       {Cantilever, L("floating cantilever")},
+                                                                       {LargeOverhang, L("large overhangs")}};
+                std::string warning_message                         = Slic3r::format(L("It seems object %s has %s. Please re-orient the object or enable support generation."),
+                                                                                     this->model_object()->name, reasons[sntype]);
                 this->active_step_add_warning(PrintStateBase::WarningLevel::NON_CRITICAL, warning_message, PrintStateBase::SlicingNeedSupportOn);
             }
 
@@ -1111,7 +1131,9 @@ bool PrintObject::invalidate_state_by_config_options(
                    || opt_key == "skeleton_infill_density"
                    || opt_key == "skin_infill_density"
                    || opt_key == "infill_lock_depth"
-                   || opt_key == "skin_infill_depth") {
+                   || opt_key == "skin_infill_depth"
+                   || opt_key == "locked_skin_infill_pattern"
+                   || opt_key == "locked_skeleton_infill_pattern") {
             steps.emplace_back(posPrepareInfill);
         } else if (opt_key == "sparse_infill_density") {
             // One likely wants to reslice only when switching between zero infill to simulate boolean difference (subtracting volumes),
@@ -1160,6 +1182,7 @@ bool PrintObject::invalidate_state_by_config_options(
             steps.emplace_back(posSlice);
         } else if (
                opt_key == "seam_position"
+            || opt_key == "seam_placement_away_from_overhangs"
             || opt_key == "seam_slope_conditional"
             || opt_key == "scarf_angle_threshold"
             || opt_key == "seam_slope_entire_loop"
@@ -1185,7 +1208,14 @@ bool PrintObject::invalidate_state_by_config_options(
             || opt_key == "inner_wall_speed"
             || opt_key == "internal_solid_infill_speed"
             || opt_key == "top_surface_speed"
-            || opt_key == "vertical_shell_speed") {
+            || opt_key == "vertical_shell_speed"
+            || opt_key == "enable_height_slowdown"
+            || opt_key == "slowdown_start_height"
+            || opt_key == "slowdown_start_speed"
+            || opt_key == "slowdown_start_acc"
+            || opt_key == "slowdown_end_height"
+            || opt_key == "slowdown_end_speed"
+            || opt_key == "slowdown_end_acc" ) {
             invalidated |= m_print->invalidate_step(psGCodeExport);
         } else if (
                opt_key == "flush_into_infill"
@@ -1247,6 +1277,23 @@ bool PrintObject::invalidate_all_steps()
 	return result;
 }
 
+void PrintObject::reset_slice_surfaces(const std::vector<std::vector<SurfaceCollection>> &slice_surfaces_cpy){
+    //reset infill surface and slice data back
+    for (size_t region_id = 0; region_id < this->num_printing_regions(); ++ region_id) {
+        for (size_t idx_layer = 0; idx_layer < m_layers.size(); ++ idx_layer) {
+
+            Layer       *layer  = m_layers[idx_layer];
+            LayerRegion *layerm = layer->m_regions[region_id];
+            if(layerm->region().config().sparse_infill_pattern == ipLockedZag){
+                layerm->slices = slice_surfaces_cpy[idx_layer][region_id];
+                ExPolygons exps;
+                layerm->fill_surfaces.keep_type(SurfaceType::stInternal, exps);
+                layerm->fill_surfaces.append(exps, SurfaceType::stTop);
+            }
+        }
+    }
+}
+
 // This function analyzes slices of a region (SurfaceCollection slices).
 // Each region slice (instance of Surface) is analyzed, whether it is supported or whether it is the top surface.
 // Initially all slices are of type stInternal.
@@ -1256,7 +1303,7 @@ bool PrintObject::invalidate_all_steps()
 // stBottom       - Part of a region, which is not supported by the same region, but it is supported either by another region, or by a soluble interface layer.
 // stInternal     - Part of a region, which is supported by the same region type.
 // If a part of a region is of stBottom and stTop, the stBottom wins.
-void PrintObject::detect_surfaces_type()
+void PrintObject::detect_surfaces_type(std::vector<std::vector<SurfaceCollection>> &slice_surfaces_cpy)
 {
     BOOST_LOG_TRIVIAL(info) << "Detecting solid surfaces..." << log_memory_info();
 
@@ -1282,6 +1329,7 @@ void PrintObject::detect_surfaces_type()
         if (interface_shells)
             surfaces_new.assign(num_layers, Surfaces());
 
+        slice_surfaces_cpy.resize(m_layers.size());
         // interface_shell 启用与否，决定着是否区分不同材料。开启后，不同材料间的接触面都会被识别为顶面、底面
         tbb::parallel_for(
             tbb::blocked_range<size_t>(0,
@@ -1290,7 +1338,7 @@ void PrintObject::detect_surfaces_type()
             		((num_layers > 1) ? num_layers - 1 : num_layers) :
             		// In non-spiral vase mode, go over all layers.
             		m_layers.size()),
-            [this, spiral_mode, region_id, interface_shells, &surfaces_new](const tbb::blocked_range<size_t>& range) {
+                [this, spiral_mode, region_id, interface_shells, &surfaces_new, &slice_surfaces_cpy](const tbb::blocked_range<size_t> &range) {
                 // BBS coconut: can't set to stBottom when soluable support is used, as the support may not be actaully generated, e.g. when "on build plate only" option is enabled. See github #3507.
                 SurfaceType surface_type_bottom_other = stBottomBridge;
                 for (size_t idx_layer = range.begin(); idx_layer < range.end(); ++ idx_layer) {
@@ -1298,6 +1346,12 @@ void PrintObject::detect_surfaces_type()
                     // BOOST_LOG_TRIVIAL(trace) << "Detecting solid surfaces for region " << region_id << " and layer " << layer->print_z;
                     Layer       *layer  = m_layers[idx_layer];
                     LayerRegion *layerm = layer->m_regions[region_id];
+                    slice_surfaces_cpy[idx_layer].resize(layer->m_regions.size());
+                    //record surface data
+                    if(layerm->region().config().sparse_infill_pattern == ipLockedZag) {
+                        // layerm->fill_surfaces_copy = layerm->fill_expolygons;
+                        slice_surfaces_cpy[idx_layer][region_id] = layerm->slices;
+                    }
                     // comparison happens against the *full* slices (considering all regions)
                     // unless internal shells are requested
                     Layer       *upper_layer = (idx_layer + 1 < this->layer_count()) ? m_layers[idx_layer + 1] : nullptr;
@@ -2785,7 +2839,7 @@ void PrintObject::bridge_over_infill()
                                 Surface tmp{*surface, {}};
                                 tmp.surface_type = stInternalBridge;
                                 tmp.bridge_angle = cs.bridge_angle;
-                                for (const ExPolygon &ep : union_ex(cs.new_polys)) {
+                                for (const ExPolygon &ep : intersection_ex(union_ex(cs.new_polys),region->fill_expolygons)) {
                                     new_surfaces.emplace_back(tmp, ep);
                                 }
                                 break;
@@ -2815,7 +2869,7 @@ void PrintObject::bridge_over_infill()
                 region->fill_surfaces.append(new_surfaces);
             }
         }
-        });
+});
 
     BOOST_LOG_TRIVIAL(info) << "Bridge over infill - End" << log_memory_info();
 
@@ -3807,7 +3861,7 @@ void PrintObject::project_and_append_custom_facets(
         if (mv->is_model_part()) {
             const indexed_triangle_set custom_facets = seam
                     ? mv->seam_facets.get_facets_strict(*mv, type)
-                    : mv->supported_facets.get_facets_strict(*mv, type);
+                    : mv->supported_facets.get_facets_strict(*mv, type);//just for support
             if (! custom_facets.indices.empty()) {
                 if (seam)
                     project_triangles_to_slabs(this->layers(), custom_facets,

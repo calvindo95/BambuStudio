@@ -1604,6 +1604,7 @@ static inline std::tuple<Polygons, Polygons, double> detect_contacts(
             [](float acc, const LayerRegion* layerm) { return std::min(acc, float(layerm->flow(frExternalPerimeter).scaled_width())); });
 
         float lower_layer_offset = 0;
+        const coordf_t xy_expansion       = scale_(object_config.support_expansion.value);
         for (LayerRegion* layerm : layer.regions()) {
             Polygons layerm_polygons = to_polygons(layerm->slices.surfaces);
 
@@ -1635,7 +1636,7 @@ static inline std::tuple<Polygons, Polygons, double> detect_contacts(
                         slices_margin.polygons);
                 }
 #else
-                diff_polygons = diff(diff_polygons, slices_margin.polygons);
+                diff_polygons = diff(offset(diff_polygons, xy_expansion), slices_margin.polygons);
 #endif
             }
             polygons_append(contact_polygons, diff_polygons);
@@ -1775,7 +1776,7 @@ static inline std::pair<SupportGeneratorLayer*, SupportGeneratorLayer*> new_cont
 
         // Contact layer will be printed with a normal flow, but
         // it will support layers printed with a bridging flow.
-        if (object_config.thick_bridges && SupportMaterialInternal::has_bridging_extrusions(layer) && print_config.independent_support_layer_height) {
+        if (object_config.thick_bridges && SupportMaterialInternal::has_bridging_extrusions(layer)/* && print_config.independent_support_layer_height*/) {
             coordf_t bridging_height = 0.;
             for (const LayerRegion* region : layer.regions())
                 bridging_height += region->region().bridging_height_avg(print_config);

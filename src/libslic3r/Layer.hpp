@@ -19,6 +19,8 @@ class LayerRegion;
 using LayerRegionPtrs = std::vector<LayerRegion*>;
 class PrintRegion;
 class PrintObject;
+struct PerimeterRegion;
+using PerimeterRegions = std::vector<PerimeterRegion>;
 
 namespace FillAdaptive {
     struct Octree;
@@ -81,7 +83,12 @@ public:
     void    prepare_fill_surfaces();
     //BBS
     void    auto_circle_compensation(SurfaceCollection &slices, const AutoContourHolesCompensationParams &auto_contour_holes_compensation_params, float manual_offset = 0.0f);
-    void    make_perimeters(const SurfaceCollection &slices, SurfaceCollection* fill_surfaces, ExPolygons* fill_no_overlap, std::vector<LoopNode> &loop_nodes);
+    void    make_perimeters(const SurfaceCollection &slices,
+                            // Configuration regions that will be applied to parts of created perimeters.
+                            const PerimeterRegions &perimeter_regions,
+                            SurfaceCollection     *fill_surfaces,
+                            ExPolygons            *fill_no_overlap,
+                            std::vector<LoopNode> &loop_nodes);
     void    process_external_surfaces(const Layer *lower_layer, const Polygons *lower_layer_covered);
     double  infill_area_threshold() const;
     // Trim surfaces by trimming polygons. Used by the elephant foot compensation at the 1st layer.
@@ -189,6 +196,7 @@ public:
     void                    recrod_cooling_node_for_each_extrusion();
     // Phony version of make_fills() without parameters for Perl integration only.
     void                    make_fills() { this->make_fills(nullptr, nullptr); }
+    void                    set_outlook_range(LockRegionParam &lock_param);
     void                    make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive::Octree* support_fill_octree, FillLightning::Generator* lightning_generator = nullptr);
     Polylines               generate_sparse_infill_polylines_for_anchoring(FillAdaptive::Octree *adaptive_fill_octree,
         FillAdaptive::Octree *support_fill_octree,
@@ -264,6 +272,8 @@ protected:
     void    simplify_support_multi_path(ExtrusionMultiPath* multipath);
     void    simplify_support_loop(ExtrusionLoop* loop);
 
+    bool has_compatible_layer_regions(const PrintRegionConfig &config, const PrintRegionConfig &other_config);
+
 private:
     // Sequential index of layer, 0-based, offsetted by number of raft layers.
     size_t              m_id;
@@ -318,6 +328,7 @@ protected:
         coordf_t   dist_to_top; // mm dist to top
         bool need_infill = false;
         bool need_extra_wall = false;
+        bool       need_cooling    = false;
         AreaGroup(ExPolygon *a, int t, coordf_t d) : area(a), type(t), dist_to_top(d) {}
     };
     std::vector<AreaGroup>                    area_groups;

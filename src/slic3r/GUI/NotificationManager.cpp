@@ -1301,6 +1301,7 @@ void NotificationManager::UpdatedItemsInfoNotification::add_type(InfoItemType ty
 		// BBS
 		//case InfoItemType::CustomSeam:          text += format(("%1$d Object has custom seam.",			"%1$d Objects have custom seam.",			(*it).second), (*it).second) + "\n"; break;
 		case InfoItemType::MmuSegmentation:     text += format(_L_PLURAL("%1$d Object has color painting.",			"%1$d Objects have color painting.",(*it).second), (*it).second) + "\n"; break;
+        case InfoItemType::FuzzySkin:           text += format(_L_PLURAL("%1$d Object has fuzzy skin.", "%1$d Objects have fuzzy skin.", (*it).second), (*it).second) + "\n"; break;
 		// BBS
 		//case InfoItemType::Sinking:             text += format(("%1$d Object has partial sinking.",		"%1$d Objects have partial sinking.",		(*it).second), (*it).second) + "\n"; break;
 		case InfoItemType::CutConnectors:       text += format(_L_PLURAL("%1$d object was loaded as a part of cut object.",		"%1$d objects were loaded as parts of cut object", (*it).second), (*it).second) + "\n"; break;
@@ -1690,6 +1691,14 @@ void NotificationManager::push_slicing_error_notification(const std::string &tex
 	push_notification_data({ NotificationType::SlicingError, NotificationLevel::ErrorNotificationLevel, 0,  _u8L("Error:") + "\n" + text, link, callback }, 0);
 	set_slicing_progress_hidden();
 }
+
+void NotificationManager::push_helio_error_notification(const std::string &text)
+{
+    set_all_slicing_errors_gray(false);
+    push_notification_data({NotificationType::HelioSlicingError, NotificationLevel::ErrorNotificationLevel, 0, _u8L("Error:") + "\n" + text, ""}, 0);
+    set_slicing_progress_hidden();
+}
+
 void NotificationManager::push_slicing_warning_notification(const std::string& text, bool gray, ModelObject const * obj, ObjectID oid, int warning_step, int warning_msg_id, NotificationLevel level/* = NotificationLevel::WarningNotificationLevel*/)
 {
 	std::function<bool(wxEvtHandler*)> callback;
@@ -1832,6 +1841,19 @@ void NotificationManager::close_plater_warning_notification(const std::string& t
 	}
 }
 
+void NotificationManager::push_flushing_volume_error_notification(NotificationType type, NotificationLevel level, const std::string &text, const std::string &hypertext, std::function<bool(wxEvtHandler *)> callback)
+{
+    set_all_slicing_errors_gray(false);
+    std::string prefix_msg = level == NotificationLevel::WarningNotificationLevel ? _u8L("Warning:") : _u8L("Error:");
+    push_notification_data({type, level, 0, prefix_msg + "\n" + text, hypertext, callback}, 0);
+}
+
+void NotificationManager::close_flushing_volume_error_notification(NotificationType type, NotificationLevel level)
+{
+    for (std::unique_ptr<PopNotification> &notification : m_pop_notifications) {
+        if (notification->get_type() == type && notification->get_data().level == level) { notification->close(); }
+    }
+}
 
 void NotificationManager::set_all_slicing_errors_gray(bool g)
 {
@@ -2108,11 +2130,12 @@ void NotificationManager::update_slicing_notif_dailytips(bool need_change)
 	// Slicing progress notification was not found - init it thru plater so correct cancel callback function is appended
 	wxGetApp().plater()->init_notification_manager();
 }
-void NotificationManager::set_slicing_progress_began()
+void NotificationManager::set_slicing_progress_began(bool is_helio)
 {
 	for (std::unique_ptr<PopNotification> & notification : m_pop_notifications) {
 		if (notification->get_type() == NotificationType::SlicingProgress) {
 			SlicingProgressNotification* spn = dynamic_cast<SlicingProgressNotification*>(notification.get());
+            spn->get_dailytips_panel()->set_is_helio(is_helio);
 			spn->set_progress_state(SlicingProgressNotification::SlicingProgressState::SP_BEGAN);
 			return;
 		}
@@ -2120,13 +2143,13 @@ void NotificationManager::set_slicing_progress_began()
 	// Slicing progress notification was not found - init it thru plater so correct cancel callback function is appended
 	wxGetApp().plater()->init_notification_manager();
 }
-void NotificationManager::set_slicing_progress_percentage(const std::string& text, float percentage)
+void NotificationManager::set_slicing_progress_percentage(const std::string& text, float percentage, bool is_helio)
 {
 	for (std::unique_ptr<PopNotification>& notification : m_pop_notifications) {
 		if (notification->get_type() == NotificationType::SlicingProgress) {
 			SlicingProgressNotification* spn = dynamic_cast<SlicingProgressNotification*>(notification.get());
 			if(spn->set_progress_state(percentage)) {
-				spn->set_status_text(text);
+				spn->set_status_text(text, is_helio);
 				wxGetApp().plater()->get_current_canvas3D()->schedule_extra_frame(0);
 			}
 			return;
@@ -2154,6 +2177,7 @@ void NotificationManager::set_slicing_progress_hidden()
 	for (std::unique_ptr<PopNotification>& notification : m_pop_notifications) {
 		if (notification->get_type() == NotificationType::SlicingProgress) {
 			SlicingProgressNotification* notif = dynamic_cast<SlicingProgressNotification*>(notification.get());
+            notif->get_dailytips_panel()->set_is_helio(false);
 			notif->set_progress_state(SlicingProgressNotification::SlicingProgressState::SP_NO_SLICING);
 			wxGetApp().plater()->get_current_canvas3D()->schedule_extra_frame(0);
 			return;
@@ -2263,40 +2287,6 @@ int  NotificationManager::progress_indicator_get_range() const
 	return 0;
 }
 
-void NotificationManager::push_hint_notification(bool open_next)
-{
-	return;
-	for (std::unique_ptr<PopNotification>& notification : m_pop_notifications) {
-		if (notification->get_type() == NotificationType::DidYouKnowHint) {
-			(dynamic_cast<HintNotification*>(notification.get()))->open_next();
-			return;
-		}
-	}
-
-	NotificationData data{ NotificationType::DidYouKnowHint, NotificationLevel::HintNotificationLevel, 300, "" };
-	// from user - open now
-	if (!open_next) {
-		push_notification_data(std::make_unique<NotificationManager::HintNotification>(data, m_id_provider, m_evt_handler, open_next), 0);
-		stop_delayed_notifications_of_type(NotificationType::DidYouKnowHint);
-		// at startup - delay for half a second to let other notification pop up, than try every 30 seconds
-		// show only if no notifications are shown
-	}
-	else {
-		auto condition = [&self = std::as_const(*this)]() {
-			return self.get_notification_count() == 0;
-		};
-		push_delayed_notification_data(std::make_unique<NotificationManager::HintNotification>(data, m_id_provider, m_evt_handler, open_next), condition, 500, 30000);
-	}
-}
-
-bool NotificationManager::is_hint_notification_open()
-{
-	for (std::unique_ptr<PopNotification>& notification : m_pop_notifications) {
-		if (notification->get_type() == NotificationType::DidYouKnowHint)
-			return true;
-	}
-	return false;
-}
 void NotificationManager::deactivate_loaded_hints()
 {
 	;

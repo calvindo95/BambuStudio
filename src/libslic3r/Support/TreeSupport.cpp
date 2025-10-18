@@ -627,7 +627,6 @@ TreeSupport::TreeSupport(PrintObject& object, const SlicingParameters &slicing_p
     Vec3d plate_offset       = m_object->print()->get_plate_origin();
     // align with the centered object in current plate (may not be the 1st plate, so need to add the plate offset)
     m_machine_border.translate(Point(scale_(plate_offset(0)), scale_(plate_offset(1))) - m_object->instances().front().shift);
-
     m_ts_data      = m_object->alloc_tree_support_preview_cache();
     top_z_distance                            = m_object_config->support_top_z_distance.value;
     if (top_z_distance > EPSILON)
@@ -945,7 +944,10 @@ void TreeSupport::detect_overhangs(bool check_support_necessity/* = false*/)
                         blocker                        = offset_ex(union_(blockers[layer_nr]), scale_(radius_sample_resolution));
                         if (!blocker.empty()) overhangs_all_layers[layer_nr] = diff_ex(overhangs_all_layers[layer_nr], blocker);
                     }
-                    if (!enforced_overhangs.empty()) overhangs_all_layers[layer_nr] = union_ex(overhangs_all_layers[layer_nr], enforced_overhangs);
+                    if (!enforced_overhangs.empty()) {
+                        enforced_overhangs             = diff_ex(offset_ex(enforced_overhangs, enforcer_overhang_offset), lower_layer->lslices_extrudable);
+                        overhangs_all_layers[layer_nr] = union_ex(overhangs_all_layers[layer_nr], enforced_overhangs);
+                    }
                 }
                 else if (layer_nr < enforcers.size() && lower_layer) {
                     if (!enforced_overhangs.empty()) {
@@ -1210,7 +1212,7 @@ void TreeSupport::detect_overhangs(bool check_support_necessity/* = false*/)
                 layer->loverhangs_with_type.clear();
                 for (const auto &cantilever : layer->cantilevers) add_overhang(layer, cantilever, OverhangType::Cantilever);
             } else {
-                ExPolygons                             enforced_overhangs = to_expolygons(enforcers[layer_nr]);
+                ExPolygons                             enforced_overhangs = offset_ex(to_expolygons(enforcers[layer_nr]), enforcer_overhang_offset);
                 ExPolygons                             loverhangs_new;
                 std::vector<std::pair<ExPolygon, int>> loverhangs_with_type_new;
                 ExPolygons                             bigflat;
@@ -1507,7 +1509,7 @@ void TreeSupport::generate_toolpaths()
     coordf_t support_extrusion_width = m_support_params.support_extrusion_width;
     coordf_t nozzle_diameter = m_print_config->nozzle_diameter.get_at(object_config.support_filament - 1);
     coordf_t layer_height = object_config.layer_height.value;
-    const size_t wall_count = object_config.tree_support_wall_count.value;
+    const int wall_count = object_config.tree_support_wall_count.value;
 
     // coconut: use same intensity settings as SupportMaterial.cpp
     auto m_support_material_interface_flow = support_material_interface_flow(m_object, float(m_slicing_params.layer_height));
@@ -1616,7 +1618,7 @@ void TreeSupport::generate_toolpaths()
         filler_raft->angle = PI / 2;
         filler_raft->spacing = support_flow.spacing();
         for (auto& poly : first_non_raft_base)
-            make_perimeter_and_infill(ts_layer->support_fills.entities, poly, std::min(size_t(1), wall_count), support_flow, erSupportMaterial, filler_raft, interface_density, false);
+            make_perimeter_and_infill(ts_layer->support_fills.entities, poly, std::min(1, wall_count), support_flow, erSupportMaterial, filler_raft, interface_density, false);
     }
 
     if (m_object->support_layer_count() <= m_raft_layers)
@@ -1747,8 +1749,16 @@ void TreeSupport::generate_toolpaths()
                                 filler_interface->layer_id = 0;
                         }
 
-                        fill_expolygons_generate_paths(ts_layer->support_fills.entities, polys, filler_interface.get(), fill_params, erSupportMaterialInterface,
-                                                       interface_flow);
+                        ExtrusionEntityCollection *temp_support_fills = new ExtrusionEntityCollection();
+                        for (auto &single_poly : union_ex(polys))
+                            make_perimeter_and_infill(temp_support_fills->entities, single_poly, 1, interface_flow, erSupportMaterialInterface, filler_interface.get(),
+                                                      interface_density, false);
+                        temp_support_fills->no_sort = true; // make sure loops are first
+                        if (!temp_support_fills->entities.empty())
+                            ts_layer->support_fills.entities.push_back(temp_support_fills);
+                        else
+                            delete temp_support_fills;
+
                     }
                     else {
                         // base_areas
@@ -1773,16 +1783,34 @@ void TreeSupport::generate_toolpaths()
                                 // allow infill-only mode if support is thick enough (so min_wall_count is 0);
                                 // otherwise must draw 1 wall
                                 // Don't need extra walls if we have infill. Extra walls may overlap with the infills.
-                                size_t min_wall_count = 1;
-                                make_perimeter_and_infill(ts_layer->support_fills.entities, poly, std::max(min_wall_count, wall_count), flow,
+                                size_t min_wall_count = wall_count == 0 ? 0 : 1;
+                                make_perimeter_and_infill(ts_layer->support_fills.entities, poly, std::max(int(min_wall_count), wall_count), flow,
                                     erSupportMaterial, filler_support.get(), support_density);
                             }
                             else {
                                 SupportParameters support_params = m_support_params;
-                                if (area_group.need_extra_wall && object_config.tree_support_wall_count.value == 0)
+                                if (area_group.need_extra_wall && object_config.tree_support_wall_count.value == -1)
                                     support_params.tree_branch_diameter_double_wall_area_scaled = 0.1;
                                 tree_supports_generate_paths(ts_layer->support_fills.entities, loops, flow, support_params);
                             }
+                        }
+
+                        if (area_group.need_cooling) 
+                        {
+                            std::function<void(ExtrusionEntityCollection *)> setOverhangDegreeImpl = [&](ExtrusionEntityCollection *entity) {
+                                for (auto entityPtr : entity->entities) {
+                                    if (ExtrusionEntityCollection *collection = dynamic_cast<ExtrusionEntityCollection *>(entityPtr)) {
+                                        setOverhangDegreeImpl(collection);
+                                    } else if (ExtrusionPath *path = dynamic_cast<ExtrusionPath *>(entityPtr)) {
+                                        path->set_overhang_degree(10);
+                                    } else if (ExtrusionMultiPath *multipath = dynamic_cast<ExtrusionMultiPath *>(entityPtr)) {
+                                        for (ExtrusionPath &path : multipath->paths) { path.set_overhang_degree(10); }
+                                    } else if (ExtrusionLoop *loop = dynamic_cast<ExtrusionLoop *>(entityPtr)) {
+                                        for (ExtrusionPath &path : loop->paths) { path.set_overhang_degree(10); }
+                                    }
+                                }
+                            };
+                            setOverhangDegreeImpl(&ts_layer->support_fills);
                         }
                     }
                 }
@@ -2205,6 +2233,10 @@ void TreeSupport::draw_circles()
     bool on_buildplate_only = m_object_config->support_on_build_plate_only.value;
     Polygon branch_circle; //Pre-generate a circle with correct diameter so that we don't have to recompute those (co)sines every time.
 
+    double orig_xy_distance = m_ts_data->m_xy_distance;
+    if (print->config().top_z_overrides_xy_distance)
+        m_ts_data->m_xy_distance = std::min(m_ts_data->m_xy_distance, double(top_z_distance));
+
     // Use square support if there are too many nodes per layer because circle support needs much longer time to compute
     // Hower circle support can be printed faster, so we prefer circle for fewer nodes case.
     const bool SQUARE_SUPPORT = avg_node_per_layer > 200;
@@ -2304,6 +2336,7 @@ void TreeSupport::draw_circles()
                 ts_layer->support_islands.reserve(curr_layer_nodes.size());
                 ExPolygons area_poly;  // the polygon node area which will be printed as normal support
                 ExPolygons extra_wall_area; //where nodes would have extra walls
+                ExPolygons cooldown_area;
                 for (const SupportNode* p_node : curr_layer_nodes)
                 {
                     if (print->canceled())
@@ -2327,57 +2360,61 @@ void TreeSupport::draw_circles()
                             append(area_poly, area);
                             if (node.need_extra_wall) append(extra_wall_area, area);
                         }
-                        if (tree_brim_width <= 0) brim_width = node.type == ePolygon ? 1 : 3;
                     }
                     else {
-                        Polygon circle(branch_circle);
-                        double  scale = node.radius / branch_radius;
-                        double moveX = node.movement.x() / (scale * branch_radius_scaled);
-                        double moveY = node.movement.y() / (scale * branch_radius_scaled);
-                        //BOOST_LOG_TRIVIAL(debug) << format("scale,moveX,moveY: %.3f,%.3f,%.3f", scale, moveX, moveY);
-
-                        if (!SQUARE_SUPPORT && std::abs(moveX)>0.001 && std::abs(moveY)>0.001) { // draw ellipse along movement direction
-                            const double vsize_inv = 0.5 / (0.01 + std::sqrt(moveX * moveX + moveY * moveY));
-                            double       matrix[2*2]  = {
-                                scale * (1 + moveX * moveX * vsize_inv),scale * (0 + moveX * moveY * vsize_inv),
-                                scale * (0 + moveX * moveY * vsize_inv),scale * (1 + moveY * moveY * vsize_inv),
-                            };
-                            int i = 0;
-                            for (auto vertex: branch_circle.points) {
-                                vertex = Point(matrix[0] * vertex.x() + matrix[1] * vertex.y(), matrix[2] * vertex.x() + matrix[3] * vertex.y());
-                                circle.points[i++] = node.position + vertex;
-                            }
-                        } else {
-                            for (int i = 0;i< circle.points.size(); i++) {
-                                circle.points[i] = circle.points[i] * scale + node.position;
-                            }
-                        }
-                        brim_width = tree_brim_width > 0 ?
-                                         tree_brim_width :
-                                         std::max(MIN_BRANCH_RADIUS_FIRST_LAYER,
-                                                  std::min(node.radius + node.dist_mm_to_top / (scale * branch_radius) * 0.5, MAX_BRANCH_RADIUS_FIRST_LAYER) - node.radius);
-                        area = avoid_object_remove_extra_small_parts(ExPolygon(circle), get_collision(node.is_sharp_tail && node.distance_to_top <= 0));
-                        // area = diff_clipped({ ExPolygon(circle) }, get_collision(node.is_sharp_tail && node.distance_to_top <= 0));
-
-                        if (!area.empty()) has_circle_node = true;
-                        if (node.need_extra_wall) append(extra_wall_area, area);
-
                         // merge overhang to get a smoother interface surface
                         // Do not merge when buildplate_only is on, because some underneath nodes may have been deleted.
                         if (top_interface_layers > 0 && (node.support_roof_layers_below > 1 || (node.support_roof_layers_below >= 0 && !node.is_sharp_tail)) &&
                             !on_buildplate_only) {
-                            ExPolygons overhang_expanded;
                             if (node.overhang.contour.size() > 100 || node.overhang.holes.size() > 1)
-                                overhang_expanded.emplace_back(node.overhang);
+                                area.emplace_back(node.overhang);
                             else {
-                                overhang_expanded = offset_ex({node.overhang}, scale_(m_ts_data->m_xy_distance));
+                                area = offset_ex({node.overhang}, scale_(orig_xy_distance));
                             }
-                            append(area, overhang_expanded);
+                        } else {
+                            Polygon circle(branch_circle);
+                            double  scale = node.radius / branch_radius;
+                            double  moveX = node.movement.x() / (scale * branch_radius_scaled);
+                            double  moveY = node.movement.y() / (scale * branch_radius_scaled);
+                            // BOOST_LOG_TRIVIAL(debug) << format("scale,moveX,moveY: %.3f,%.3f,%.3f", scale, moveX, moveY);
+
+                            if (!SQUARE_SUPPORT && std::abs(moveX) > 0.001 && std::abs(moveY) > 0.001) { // draw ellipse along movement direction
+                                const double vsize_inv     = 0.5 / (0.01 + std::sqrt(moveX * moveX + moveY * moveY));
+                                double       matrix[2 * 2] = {
+                                    scale * (1 + moveX * moveX * vsize_inv),
+                                    scale * (0 + moveX * moveY * vsize_inv),
+                                    scale * (0 + moveX * moveY * vsize_inv),
+                                    scale * (1 + moveY * moveY * vsize_inv),
+                                };
+                                int i = 0;
+                                for (auto vertex : branch_circle.points) {
+                                    vertex             = Point(matrix[0] * vertex.x() + matrix[1] * vertex.y(), matrix[2] * vertex.x() + matrix[3] * vertex.y());
+                                    circle.points[i++] = node.position + vertex;
+                                }
+                            } else {
+                                for (int i = 0; i < circle.points.size(); i++) { circle.points[i] = circle.points[i] * scale + node.position; }
+                            }
+                            // brim_width = tree_brim_width > 0 ?
+                            //                  tree_brim_width :
+                            //                  std::max(MIN_BRANCH_RADIUS_FIRST_LAYER,
+                            //                           std::min(node.radius + node.dist_mm_to_top / (scale * branch_radius) * 0.5, MAX_BRANCH_RADIUS_FIRST_LAYER) - node.radius);
+                            area = avoid_object_remove_extra_small_parts(ExPolygon(circle), get_collision(node.is_sharp_tail && node.distance_to_top <= 0));
+                            // area = diff_clipped({ ExPolygon(circle) }, get_collision(node.is_sharp_tail && node.distance_to_top <= 0));
                         }
+
+                        if (!area.empty()) has_circle_node = true;
+                        if (node.need_extra_wall) append(extra_wall_area, area);
+                        if (node.overhang_degree >= 2) append(cooldown_area, area);
                     }
 
-                    if (layer_nr == 0 && m_raft_layers == 0)
+                    if (layer_nr == 0 && m_raft_layers == 0) {
+                        if (tree_brim_width >= 0) brim_width = tree_brim_width;
+                        else {
+                            for (const auto &expoly : area)
+                                brim_width = std::max(brim_width, expoly.map_moment_to_expansion(m_object_config->support_speed.values[0], node.dist_mm_to_top));
+                        }
                         area = safe_offset_inc(area, scale_(brim_width), get_collision(false), scale_(MIN_BRANCH_RADIUS * 0.5), 0, 1);
+                    }
                     if (obj_layer_nr>0 && node.distance_to_top < 0)
                         append(roof_gap_areas, area);
                     else if (m_support_params.num_top_interface_layers > 0 && obj_layer_nr > 0 && (node.support_roof_layers_below == 0 || node.support_roof_layers_below == 1) &&
@@ -2461,6 +2498,7 @@ void TreeSupport::draw_circles()
                     area_groups.back().need_infill = overlaps({ expoly }, area_poly);
                     bool need_extra_wall = overlaps({expoly},extra_wall_area);
                     area_groups.back().need_extra_wall = need_extra_wall && !area_groups.back().need_infill;
+                    area_groups.back().need_cooling = overlaps({ expoly }, cooldown_area);
                 }
                 for (auto& expoly : ts_layer->roof_areas) {
                     //if (area(expoly) < SQ(scale_(1))) continue;
@@ -2880,6 +2918,18 @@ void TreeSupport::drop_nodes()
                 if (!overlap_with_circle.empty() && is_inside_ex(overlap_with_circle, node.position)) {
                     continue;
                 }
+                Polygon circle = make_circle(scale_(node.radius), 0.00789 * scale_(node.radius));
+                circle.translate(node.position);
+                ExPolygons area = avoid_object_remove_extra_small_parts(ExPolygon(circle), get_collision(0, obj_layer_nr));
+                if (!area.empty()) {
+                    p_node->overhang = area[0];
+                    if (area[0].area() < SQ(scale_(1.)) || (!node.parent->to_buildplate && !overlaps({node.overhang}, {node.parent->overhang}))) {
+                        p_node->valid        = false;
+                        p_node->is_processed = true;
+                        continue;
+                    }
+                } else
+                    continue;
             }
             if (node.to_buildplate || parts.empty()) //It's outside, so make it go towards the build plate.
             {
@@ -3327,6 +3377,14 @@ void TreeSupport::drop_nodes()
             );
         }
 
+        if (layer_nr_next == 0 && support_on_buildplate_only && !contact_nodes[layer_nr_next].empty()) {
+            for (SupportNode *node : contact_nodes[layer_nr_next]) {
+                if (!node->to_buildplate) { 
+                    unsupported_branch_leaves.push_front({layer_nr_next, node});
+                }
+            }
+        }
+
 #ifdef SUPPORT_TREE_DEBUG_TO_SVG
         if (contact_nodes[layer_nr].empty() == false) {
             draw_contours_and_nodes_to_svg(debug_out_path("contact_points_%.2f.svg", contact_nodes[layer_nr][0]->print_z), get_collision(0,obj_layer_nr_next),
@@ -3362,8 +3420,10 @@ void TreeSupport::drop_nodes()
                     }
                     if (i_node->child) {
                         i_node->child->parent = i_node->parent;
-                        i_node->child->parents.erase(std::find(i_node->child->parents.begin(), i_node->child->parents.end(), i_node));
-                        append(i_node->child->parents, i_node->parents);
+                        auto it = std::find(i_node->child->parents.begin(), i_node->child->parents.end(), i_node);
+                        if (it != i_node->child->parents.end()) i_node->child->parents.erase(it);
+                        if (!i_node->parents.empty())
+                            append(i_node->child->parents, i_node->parents);
                     }
                     i_node->is_processed = true;  // mark to be deleted later
 
@@ -3441,6 +3501,7 @@ void TreeSupport::smooth_nodes()
                             branch[i]->radius = radii1[i];
                             branch[i]->movement = (pts[i + 1] - pts[i - 1]) / 2;
                             branch[i]->is_processed = true;
+                            branch[i]->overhang_degree = std::min(10.0, unscale_((branch[i]->movement).cast<double>().norm()) / m_object_config->support_line_width * 10);
                             if (branch[i]->parents.size() > 1 || (branch[i]->movement.x() > max_move || branch[i]->movement.y() > max_move) ||
                                 (total_height > thresh_tall_branch && branch[i]->dist_mm_to_top < thresh_dist_to_top))
                                 branch[i]->need_extra_wall = true;
@@ -3845,18 +3906,17 @@ void TreeSupport::generate_contact_points()
                 bool       add_interface  = (force_tip_to_roof || area(overhang_part) > minimum_roof_area);
                 const auto &relevant_forbidden = get_collision(0, layer_nr - 1);
                 ExPolygons overhangs{overhang_part};
-                ExPolygons overhangs_regular, overhangs_no_extra_expand;
-                if (add_interface && xy_expansion > EPSILON && !is_sharp_tail) {
-                    overhangs = safe_offset_inc(overhangs, xy_expansion, relevant_forbidden, scale_(MIN_BRANCH_RADIUS * 1.75), 0, 1);
-                }
-                overhangs_no_extra_expand = (!is_sharp_tail && (unscale_(xy_expansion) - config.support_expansion.value > EPSILON) && (config.support_expansion.value > EPSILON)) ?
-                                                safe_offset_inc({overhang_part}, scale_(config.support_expansion.value), relevant_forbidden, scale_(MIN_BRANCH_RADIUS * 1.75), 0, 1) :
-                                                overhangs;
+                ExPolygons overhangs_regular;
+                if (!is_sharp_tail && (config.support_expansion.value > EPSILON))
+                    overhangs = safe_offset_inc({overhang_part}, scale_(config.support_expansion.value), relevant_forbidden, scale_(MIN_BRANCH_RADIUS * 1.75), 0, 1);
                 if (m_support_params.support_style == smsTreeHybrid &&
                     (overhang_type & (BigFlat | ThinPlate))) {
-                    overhangs_regular           = offset_ex(intersection_ex(overhangs, m_ts_data->m_layer_outlines_below[layer_nr - 1]), radius_scaled);
-                    ExPolygons overhangs_normal = offset2_ex(diff_ex(overhangs, overhangs_regular),scale_(extrusion_width),-scale_(extrusion_width));
-                    overhangs_regular           = intersection_ex(overhangs_regular, overhangs_no_extra_expand);
+                    overhangs_regular = intersection_ex(overhangs, offset_ex(m_ts_data->m_layer_outlines_below[layer_nr - 1], scale_(config.support_object_xy_distance.value)));
+                    ExPolygons overhangs_normal = offset2_ex(diff_ex({overhang_part}, overhangs_regular), scale_(extrusion_width), -scale_(extrusion_width));
+                    if (add_interface && xy_expansion > EPSILON && !is_sharp_tail)
+                        overhangs_normal = safe_offset_inc(overhangs_normal, xy_expansion,
+                                                           offset_ex(m_ts_data->m_layer_outlines_below[layer_nr - 1], scale_(config.support_object_xy_distance.value)),
+                                                           scale_(MIN_BRANCH_RADIUS * 1.75), 0, 1);
                     // if the outside area is still big, we can need normal nodes
                     coord_t gap_width = scale_(extrusion_width / 2.) + scale_(m_ts_data->m_xy_distance);
                     ExPolygons overhangs_normal_split;
@@ -3869,7 +3929,7 @@ void TreeSupport::generate_contact_points()
                     }
                     for (auto &overhang : overhangs_normal_split) {
                         if (!is_stable(layer->bottom_z(), overhang, 0) || overhang.area() < SQ(scale_(2.))) {
-                            ExPolygons unstable_overhangs = intersection_ex({overhang}, overhangs_no_extra_expand);
+                            ExPolygons unstable_overhangs = intersection_ex({overhang}, overhangs);
                             overhangs_regular.insert(overhangs_regular.end(), unstable_overhangs.begin(), unstable_overhangs.end());
                             continue;
                         }
@@ -3883,9 +3943,10 @@ void TreeSupport::generate_contact_points()
                     }
                 }
                 else{
-                    overhangs_regular = overhangs_no_extra_expand;
+                    overhangs_regular = overhangs;
                 }
 
+                overhangs_regular = diff_ex(overhangs_regular, relevant_forbidden);
                 for (auto &overhang : overhangs_regular) {
                     if (is_sharp_tail && !m_support_params.soluble_interface && overhang.area() < SQ(scale_(2.))) add_interface = false;
                     BoundingBox overhang_bounds = get_extents(overhang);

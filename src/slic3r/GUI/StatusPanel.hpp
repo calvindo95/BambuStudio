@@ -7,6 +7,7 @@
 #include "SliceInfoPanel.hpp"
 #include "CameraPopup.hpp"
 #include "GUI.hpp"
+#include "ThermalPreconditioningDialog.hpp"
 #include <wx/panel.h>
 #include <wx/bitmap.h>
 #include <wx/image.h>
@@ -18,6 +19,7 @@
 #include "Calibration.hpp"
 #include "CalibrationWizardPage.hpp"
 #include "PrintOptionsDialog.hpp"
+#include "SafetyOptionsDialog.hpp"
 #include "AMSMaterialsSetting.hpp"
 #include "ExtrusionCalibration.hpp"
 #include "ReleaseNote.hpp"
@@ -32,12 +34,17 @@
 #include "Widgets/FilamentLoad.hpp"
 #include "Widgets/FanControl.hpp"
 #include "HMS.hpp"
+#include "PartSkipDialog.hpp"
+#include "DeviceErrorDialog.hpp"
 
 class StepIndicator;
 
 #define COMMAND_TIMEOUT         5
 
 namespace Slic3r {
+
+class DevExtderSystem;
+
 namespace GUI {
 
 // Previous definitions
@@ -155,10 +162,7 @@ public:
     void msw_rescale();
 
 private:
-    void updateSwitchingLabel(const ExtruderSwitchState &state);
-
-    void updateBy(const ExtderData& ext_data);
-    void updateBtnGroup(const ExtderData &ext_data);
+    void updateBy(const DevExtderSystem* ext_system);
     void showQuitBtn(bool show);
     void showRetryBtn(bool show);
 
@@ -254,9 +258,15 @@ class RectTextPanel : public wxPanel
 public:
     RectTextPanel(wxWindow *parent);
 
+public:
     void setText(const wxString text);
+    wxString getText() const { return text; }
 
+    void Rescale();
+
+protected:
     void OnPaint(wxPaintEvent &event);
+
 private:
     wxString text;
 };
@@ -270,8 +280,9 @@ public:
 
 
 private:
-    MachineObject*  m_obj;
+    MachineObject*  m_obj{nullptr};
     ScalableBitmap  m_thumbnail_placeholder;
+    std::string     m_thumbnail_bmp_display_name;
     wxBitmap        m_thumbnail_bmp_display;
     ScalableBitmap  m_bitmap_use_time;
     ScalableBitmap  m_bitmap_use_weight;
@@ -287,11 +298,12 @@ private:
     wxStaticText*   m_staticText_consumption_of_time;
     wxStaticText*   m_staticText_consumption_of_weight;
     wxStaticText*   m_printing_stage_value;
+    ScalableButton* m_question_button;
     wxStaticText*   m_staticText_profile_value;
     wxStaticText*   m_staticText_progress_percent;
     wxStaticText*   m_staticText_progress_percent_icon;
     wxStaticText*   m_staticText_progress_left;
-    wxStaticText*   m_staticText_finish_time;
+    Label*          m_staticText_finish_time;
     RectTextPanel*  m_staticText_finish_day;
     wxStaticText*   m_staticText_layers;
     wxStaticText *  m_has_rated_prompt;
@@ -302,16 +314,24 @@ private:
     wxStaticBitmap* m_bitmap_static_use_weight;
     ScalableButton* m_button_pause_resume;
     ScalableButton* m_button_abort;
+    Button*         m_button_partskip;
     Button*         m_button_market_scoring;
     Button*         m_button_clean;
     Button *                      m_button_market_retry;
     wxPanel *                     m_score_subtask_info;
     wxPanel *                     m_score_staticline;
     wxPanel *                     m_request_failed_panel;
+    wxPanel                      *m_printing_stage_underline;
+    wxPanel                      *m_printing_stage_panel;
+
     // score page
     int                           m_star_count;
     std::vector<ScalableButton *> m_score_star;
     bool                          m_star_count_dirty = false;
+
+    // partskip button
+    int m_part_skipped_count{ 0 };
+    int m_part_skipped_dirty{ 0 };
 
     ProgressBar*    m_gauge_progress;
     Label* m_error_text;
@@ -327,10 +347,16 @@ public:
     void msw_rescale();
 
 public:
+    void enable_partskip_button(MachineObject* obj, bool enable);
     void enable_pause_resume_button(bool enable, std::string type);
     void enable_abort_button(bool enable);
     void update_subtask_name(wxString name);
     void update_stage_value(wxString stage, int val);
+    void update_stage_value_with_machine(wxString stage, int val, MachineObject* obj = nullptr);
+    void on_stage_clicked(wxMouseEvent& event);
+
+    // Public interface to update remaining time text in the thermal dialog
+    void update_thermal_remaining_time(MachineObject* obj);
     void update_progress_percent(wxString percent, wxString icon);
     void update_left_time(wxString time);
     void update_finish_time(wxString finish_time);
@@ -339,16 +365,15 @@ public:
     void update_layers_num(bool show, wxString num = wxEmptyString);
     void show_priting_use_info(bool show, wxString time = wxEmptyString, wxString weight = wxEmptyString);
     void show_profile_info(bool show, wxString profile = wxEmptyString);
-    void set_thumbnail_img(const wxBitmap& bmp);
+    void set_thumbnail_img(const wxBitmap& bmp, const std::string& bmp_name);
     void set_brightness_value(int value) { m_brightness_value = value; }
     void set_plate_index(int plate_idx = -1);
-    void market_scoring_show();
-    bool is_market_scoring_show();
-    void market_scoring_hide();
+    void market_scoring_show(bool show);
 
 public:
     ScalableButton* get_abort_button() {return m_button_abort;};
     ScalableButton* get_pause_resume_button() {return m_button_pause_resume;};
+    Button* get_partskip_button() { return m_button_partskip; };
     Button* get_market_scoring_button() {return m_button_market_scoring;};
     Button * get_market_retry_buttom() { return m_button_market_retry; };
     Button* get_clean_button() {return m_button_clean;};
@@ -359,6 +384,10 @@ public:
     std::vector<ScalableButton *> &get_score_star() { return m_score_star; }
     bool get_star_count_dirty() { return m_star_count_dirty; }
     void set_star_count_dirty(bool dirty) { m_star_count_dirty = dirty; }
+    int get_part_skipped_count() { return m_part_skipped_count; }
+    void set_part_skipped_count(int count) { m_part_skipped_count = count; }
+    int get_part_skipped_dirty() { return m_part_skipped_dirty; }
+    void set_part_skipped_dirty(int dirty) { m_part_skipped_dirty = dirty; }
     void                           set_has_reted_text(bool has_rated);
     void paint(wxPaintEvent&);
 };
@@ -417,6 +446,8 @@ protected:
     wxStaticText *  m_staticText_timelapse;
     SwitchButton *  m_bmToggleBtn_timelapse;
 
+    wxStaticText *m_mqtt_source;
+
     wxStaticBitmap *m_bitmap_camera_img;
     wxStaticBitmap *m_bitmap_recording_img;
     wxStaticBitmap *m_bitmap_timelapse_img;
@@ -440,6 +471,7 @@ protected:
     wxStaticText *  m_staticText_progress_left;
     wxStaticText *  m_staticText_layers;
     Button *        m_button_report;
+    Button *        m_button_partskip;
     ScalableButton *m_button_pause_resume;
     ScalableButton *m_button_abort;
     Button *        m_button_clean;
@@ -499,6 +531,7 @@ protected:
     wxStaticText *  m_ams_debug;
     bool            m_show_ams_group{false};
     bool            m_show_filament_group{ false };
+
     AMSControl*     m_ams_control;
     StaticBox*      m_ams_control_box;
     wxStaticBitmap *m_ams_extruder_img;
@@ -518,6 +551,7 @@ protected:
     wxStaticText*   m_calibration_text;
     Button*         m_parts_btn;
     Button*         m_options_btn;
+    Button*         m_safety_btn;
     Button*         m_calibration_btn;
     StepIndicator*  m_calibration_flow;
 
@@ -533,6 +567,7 @@ protected:
     StaticBox* m_filament_load_box;
 
     // Virtual event handlers, override them in your derived class
+    virtual void on_subtask_partskip(wxCommandEvent &event) { event.Skip(); }
     virtual void on_subtask_pause_resume(wxCommandEvent &event) { event.Skip(); }
     virtual void on_subtask_abort(wxCommandEvent &event) { event.Skip(); }
     virtual void on_lamp_switch(wxCommandEvent &event) { event.Skip(); }
@@ -599,11 +634,11 @@ protected:
     AMSSetting *m_ams_setting_dlg{nullptr};
     PrinterPartsDialog*  print_parts_dlg { nullptr };
     PrintOptionsDialog*  print_options_dlg { nullptr };
+    SafetyOptionsDialog* safety_options_dlg { nullptr };
     CalibrationDialog*   calibration_dlg {nullptr};
     AMSMaterialsSetting *m_filament_setting_dlg{nullptr};
 
-    PrintErrorDialog* m_print_error_dlg = nullptr;
-    SecondaryCheckDialog* m_print_error_dlg_no_action = nullptr;
+    DeviceErrorDialog* m_print_error_dlg = nullptr;
     SecondaryCheckDialog* abort_dlg = nullptr;
     SecondaryCheckDialog* con_load_dlg = nullptr;
     MessageDialog *       ctrl_e_hint_dlg             = nullptr;
@@ -614,6 +649,7 @@ protected:
     FanControlPopupNew* m_fan_control_popup{nullptr};
 
     ExtrusionCalibration *m_extrusion_cali_dlg{nullptr};
+    PartSkipDialog       *m_partskip_dlg{nullptr};
 
     wxString     m_request_url;
     bool         m_start_loading_thumbnail = false;
@@ -654,10 +690,10 @@ protected:
 
     void on_market_scoring(wxCommandEvent &event);
     void on_market_retry(wxCommandEvent &event);
+    void on_subtask_partskip(wxCommandEvent &event);
     void on_subtask_pause_resume(wxCommandEvent &event);
     void on_subtask_abort(wxCommandEvent &event);
     void on_print_error_clean(wxCommandEvent &event);
-    void show_error_message(MachineObject *obj, bool is_exist, wxString msg, std::string print_error_str = "", wxString image_url = "", std::vector<int> used_button = std::vector<int>());
     void error_info_reset();
     void show_recenter_dialog();
 
@@ -698,8 +734,6 @@ protected:
     void on_ams_selected(wxCommandEvent &event);
     void on_ams_guide(wxCommandEvent &event);
     void on_ams_retry(wxCommandEvent &event);
-    void on_print_error_done(wxCommandEvent& event);
-    void on_print_error_dlg_btn_clicked(wxCommandEvent& event);
 
     void on_fan_changed(wxCommandEvent& event);
     void on_cham_temp_kill_focus(wxFocusEvent& event);
@@ -721,6 +755,8 @@ protected:
     void on_show_parts_options(wxCommandEvent& event);
     /* print options */
     void on_show_print_options(wxCommandEvent &event);
+    /* safety options */
+    void on_show_safety_options(wxCommandEvent &event);
 
     /* calibration */
     void on_start_calibration(wxCommandEvent &event);
@@ -733,12 +769,14 @@ protected:
     void update_basic_print_data(bool def = false);
     void update_model_info();
     void update_subtask(MachineObject* obj);
+    void update_partskip_subtask(MachineObject *obj);
     void update_cloud_subtask(MachineObject *obj);
     void update_sdcard_subtask(MachineObject *obj);
     void update_temp_ctrl(MachineObject *obj);
     void update_misc_ctrl(MachineObject *obj);
     void update_ams(MachineObject* obj);
-    void update_ams_insert_material(MachineObject* obj);
+    void update_filament_loading_panel(MachineObject* obj);
+
     void update_extruder_status(MachineObject* obj);
     void update_ams_control_state(std::string ams_id, std::string slot_id);
     void update_cali(MachineObject* obj);
@@ -751,6 +789,12 @@ protected:
     /* camera */
     void update_camera_state(MachineObject* obj);
     bool show_vcamera = false;
+
+    // partskip button
+    void update_partskip_button(MachineObject* obj);
+
+    // printer parts options
+    void update_printer_parts_options(MachineObject* obj);
 
 public:
     void update_error_message();

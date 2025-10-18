@@ -20,6 +20,12 @@
     "counter_limit_max": [
         "0.05"
     ],
+    "eng_plate_temp": [
+        "55"
+    ],
+    "eng_plate_temp_initial_layer": [
+        "55"
+    ],
     "filament_deretraction_speed": [
         "nil",
         "nil"
@@ -104,6 +110,10 @@
         "0",
         "0"
     ],
+    "filament_adaptive_volumetric_speed": [
+        "0",
+        "0"
+    ],
     "hole_coef_2": [
         "-0.0081"
     ],
@@ -131,6 +141,10 @@
     ],
     "slow_down_layer_time": [
         "6"
+    ],
+    "volumetric_speed_coefficients": [
+        "0 0 0 0 0 0",
+        "0 0 0 0 0 0"
     ],
     "compatible_printers": [
         "Bambu Lab H2D 0.4 nozzle",

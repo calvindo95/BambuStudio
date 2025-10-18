@@ -254,7 +254,12 @@ void CaliPASaveAutoPanel::sync_cali_result(const std::vector<PACalibResult>& cal
     }
     preset_names = default_naming(preset_names);
 
-    for (auto& item : cali_result) {
+    std::vector<PACalibResult> sorted_cali_result = cali_result;
+    std::sort(sorted_cali_result.begin(), sorted_cali_result.end(), [this](const PACalibResult &left, const PACalibResult& right) {
+        return left.tray_id < right.tray_id;
+    });
+
+    for (auto &item : sorted_cali_result) {
         bool result_failed = false;
         if (item.confidence != 0) {
             result_failed = true;
@@ -333,7 +338,13 @@ void CaliPASaveAutoPanel::sync_cali_result(const std::vector<PACalibResult>& cal
             n_value->GetTextCtrl()->SetValue(n_str);
 
             for (auto& name : preset_names) {
-                if (item.tray_id == name.first) {
+                int tray_id = item.tray_id;
+                /* upgrade single extruder printer tray_id from 254 to 255 */
+                if (!m_obj->is_multi_extruders() && tray_id == VIRTUAL_TRAY_DEPUTY_ID) {
+                    tray_id = VIRTUAL_TRAY_MAIN_ID;
+                }
+
+                if (tray_id == name.first) {
                     comboBox_tray_name->SetValue(from_u8(name.second));
                 }
             }
@@ -603,6 +614,16 @@ void CaliPASaveAutoPanel::sync_cali_result_for_multi_extruder(const std::vector<
     bool left_first_add_item = true;
     bool right_first_add_item = true;
     std::vector<PACalibResult> sorted_cali_result   = cali_result;
+    if (m_obj && m_obj->is_support_new_auto_cali_method) {
+        for (auto &res : sorted_cali_result) {
+            if (res.ams_id == VIRTUAL_TRAY_MAIN_ID || res.ams_id == VIRTUAL_TRAY_DEPUTY_ID) {
+                res.tray_id = res.ams_id;
+            } else {
+                res.tray_id = res.ams_id * 4 + res.slot_id;
+            }
+        }
+    }
+
     std::sort(sorted_cali_result.begin(), sorted_cali_result.end(), [](const PACalibResult &left, const PACalibResult &right) {
         return left.tray_id < right.tray_id;
     });
@@ -1200,7 +1221,7 @@ void CalibrationPASavePage::create_page(wxWindow* parent)
 void CalibrationPASavePage::sync_cali_result(MachineObject* obj)
 {
     // only auto need sync cali_result
-    if (obj && m_cali_method == CalibrationMethod::CALI_METHOD_AUTO) {
+    if (obj && (m_cali_method == CalibrationMethod::CALI_METHOD_AUTO || m_cali_method == CalibrationMethod::CALI_METHOD_NEW_AUTO)) {
         m_auto_panel->sync_cali_result(obj->pa_calib_results, obj->pa_calib_tab);
     } else {
         std::vector<PACalibResult> empty_result;

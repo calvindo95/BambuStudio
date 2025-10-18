@@ -48,6 +48,12 @@
 #define  PRINT_OPT_BG_GRAY       0xF8F8F8
 #define  PRINT_OPT_ITEM_BG_GRAY  0xEEEEEE
 
+
+// Previous definitions
+namespace Slic3r{
+    class DevExtder;
+}
+
 namespace Slic3r { namespace GUI {
 
 std::string get_nozzle_volume_type_cloud_string(NozzleVolumeType nozzle_volume_type);
@@ -193,6 +199,7 @@ private:
     std::string         m_param;
     std::vector<POItem> m_ops;
     Label              *m_printoption_title{nullptr};
+    ScalableButton     *m_printoption_tips{ nullptr };
     PrintOptionItem    *m_printoption_item{nullptr};
 
 public:
@@ -212,7 +219,7 @@ public:
     void        update_options(std::vector<POItem> ops, const wxString &tips);
     void        update_tooltip(const wxString &tips);
 
-    void  msw_rescale() { m_printoption_item->msw_rescale(); };
+    void  msw_rescale();
 
     // override funcs
     bool  CanBeFocused() const override { return false; }
@@ -286,6 +293,7 @@ private:
     bool                                m_is_canceled{ false };
     bool                                m_is_rename_mode{ false };
     bool                                m_check_flag {false};
+    bool                                m_ext_change_assist{ false };
     PrintPageMode                       m_print_page_mode{PrintPageMode::PrintPageModePrepare};
     std::string                         m_print_error_msg;
     std::string                         m_print_error_extra;
@@ -365,6 +373,8 @@ protected:
     Label*                              m_stext_weight{ nullptr };
     PrinterMsgPanel *                   m_statictext_ams_msg{nullptr};
     Label*                              m_txt_change_filament_times{ nullptr };
+    CheckBox*                           m_check_ext_change_assist{ nullptr };
+    Label*                              m_label_ext_change_assist{ nullptr };
 
     PrinterInfoBox*                     m_printer_box { nullptr};
     PrinterMsgPanel *                   m_text_printer_msg{nullptr};
@@ -426,12 +436,15 @@ public:
     void finish_mode();
 	void sync_ams_mapping_result(std::vector<FilamentInfo>& result);
     void prepare(int print_plate_idx);
-    void show_status(PrintDialogStatus status, std::vector<wxString> params = std::vector<wxString>());
+    void show_status(PrintDialogStatus status, std::vector<wxString> params = std::vector<wxString>(), wxString wiki_url = wxEmptyString);
     void sys_color_changed();
     void reset_timeout();
     void update_user_printer();
     void reset_ams_material();
     void update_show_status(MachineObject* obj_ = nullptr);
+
+    void UpdateStatusCheckWarning_ExtensionTool(MachineObject* obj_);
+
     void update_ams_check(MachineObject* obj);
     void update_filament_change_count();
     void on_rename_click(wxMouseEvent &event);
@@ -441,7 +454,6 @@ public:
     void show_errors(wxString& info);
     void on_ok_btn(wxCommandEvent& event);
     void Enable_Auto_Refill(bool enable);
-    void connect_printer_mqtt();
     void on_send_print();
     void clear_ip_address_config(wxCommandEvent& e);
     void on_refresh(wxCommandEvent& event);
@@ -466,18 +478,14 @@ public:
     void Enable_Send_Button(bool en);
     void on_dpi_changed(const wxRect& suggested_rect) override;
     void update_user_machine_list();
-    void     update_ams_status_msg(vector<wxString> msg, bool is_error, bool is_single);
-    void     update_priner_status_msg(vector<wxString> msg, bool is_error, bool is_single);
-    //void     update_priner_status_msg(vector<wxString> msg);
-    void update_printer_status_msg_tips(const wxString& msg_tips);
     void update_print_status_msg();
     void update_print_error_info(int code, std::string msg, std::string extra);
     bool has_timelapse_warning(wxString& msg);
     bool has_timelapse_warning() { wxString msg; return has_timelapse_warning(msg);};
-    bool can_support_auto_cali();
+    bool can_support_pa_auto_cali();
     bool is_same_printer_model();
     bool is_blocking_printing(MachineObject* obj_);
-    bool is_nozzle_hrc_matched(const Extder& extruder, std::string& filament_type) const;
+    bool is_nozzle_hrc_matched(const DevExtder* extruder, std::string& filament_type) const;
     bool check_sdcard_for_timelpase(MachineObject* obj);
     bool is_timeout();
     int  update_print_required_data(Slic3r::DynamicPrintConfig config, Slic3r::Model model, Slic3r::PlateDataPtrs plate_data_list, std::string file_name, std::string file_path);
@@ -487,9 +495,9 @@ public:
     bool do_ams_mapping(MachineObject *obj_,bool use_ams);
     bool get_ams_mapping_result(std::string& mapping_array_str, std::string& mapping_array_str2, std::string& ams_mapping_info);
     bool build_nozzles_info(std::string& nozzles_info);
-    bool can_hybrid_mapping(ExtderData data);
-    void auto_supply_with_ext(std::vector<AmsTray> slots);
-    bool is_nozzle_type_match(ExtderData data, wxString& error_message) const;
+    bool can_hybrid_mapping(DevExtderSystem data);
+    void auto_supply_with_ext(std::vector<DevAmsTray> slots);
+    bool is_nozzle_type_match(DevExtderSystem data, wxString& error_message) const;
     int  convert_filament_map_nozzle_id_to_task_nozzle_id(int nozzle_id);
 
     PrintFromType get_print_type() {return m_print_type;};
@@ -510,6 +518,9 @@ private:
     void load_option_vals(MachineObject* obj);
     void save_option_vals();
     void save_option_vals(MachineObject *obj);
+
+    // enbale or disable external change assist
+    bool is_enable_external_change_assist(std::vector<FilamentInfo>& ams_mapping_result);
 };
 
 class PrinterInfoBox : public StaticBox
